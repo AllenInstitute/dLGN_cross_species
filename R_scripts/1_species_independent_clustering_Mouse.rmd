@@ -1,0 +1,443 @@
+---
+title: 'Species independent clustering: Mouse'
+author: "Cy"
+date: "9/07/2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+
+```{r load-libraries, echo=FALSE, quietly=T}
+library(dplyr)
+library(Seurat)
+library(SeuratWrappers)
+library(ggplot2)
+library(cowplot)
+library(scrattch.hicat)
+library(feather)
+library(Matrix)
+
+source("../R_scripts/doublet.finder.r")
+source("../R_scripts/hicat_modules.r")
+
+load("../int_data/collected_data_20200818.rda")
+set.seed(0)
+
+```
+
+
+```{r}
+spec="mouse"
+
+keepgen=grep("^LOC|^mt-|^Rpl|^Rps",rownames(datlist[[spec]]),val=T,invert=T)
+
+```
+
+
+### calculate doublet scores ###
+```{r doublet-score}
+alldoublet <- doubletFinder(datlist[[spec]], select.genes=keepgen, 
+                            proportion.artificial = 0.2, plot=T)
+doublet.scores <- alldoublet[[1]] 
+
+
+### inspect doublet.score threshold ###
+alldoublet[[3]]
+
+noise <- intersect(names(doublet.scores)[doublet.scores>0.25],colnames(datlist[[spec]]))
+
+print(paste("Failed doublet.score threshold (0.25) =",length(noise)))
+
+
+```
+
+
+```{r, eval=FALSE}
+save(doublet.scores,file=paste0("../analysis_output/doublet.score_", spec,".rda"))
+
+ggsave(alldoublet[[3]], file=paste0("../analysis_output/doublet.score_",spec,".pdf"), height = 4, width = 5)
+```
+
+#clustering of cells from all donors
+
+```{r}
+load(paste0("../analysis_output/doublet.score_", spec,".rda"))
+
+keepcells1=intersect(names(doublet.scores)[doublet.scores<0.25],colnames(datlist[[spec]]))
+
+set.seed(0)
+
+m.int <- CreateSeuratObject(counts = datlist[[spec]][keepgen,keepcells1], meta.data = metalist[[spec]][keepcells1,])
+m.int <- NormalizeData(object = m.int)
+
+m.int <- ScaleData(object = m.int, verbose = FALSE)
+
+m.int <- FindVariableFeatures(object = m.int, selection.method = "vst",      nfeatures = 3000) #2000 for mouse and macaque
+m.int <- RunPCA(object = m.int, npcs = 30, verbose = FALSE)
+m.int <- RunTSNE(object = m.int, reduction = "pca", dims = 1:30)
+m.int <- RunUMAP(object = m.int, reduction = "pca", dims = 1:30)
+m.int <- FindNeighbors(object = m.int, k.param = 8,dims=1:30)
+m.int <- FindClusters(object = m.int, resolution = 0.4) ##0.2 for macaque,0.4 for mouse
+```
+
+
+```{r m.int plotting all}
+
+DimPlot(m.int,reduction = "umap",label = TRUE)
+DimPlot(m.int,reduction = "umap",group.by="external_donor_name",label = TRUE)
+
+
+FeaturePlot(m.int,features=c("Gad2","Slc17a6","Ebf1", "Foxp2"))
+plot<- DotPlot(m.int,features=c("Gad2","Slc17a6","Snap25","Aqp4","Ctss","Olig2","Opalin","Lamp5","Pdgfra"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+plot<-DotPlot(m.int,features=c("Gad2","Slc17a6","Snap25","Aqp4","Gfap","Aif1","Tmem119","Ms4a7","Olig2","Opalin","Pdgfra","Lamp5","Vcan","Cspg4","Chrna6"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+table(m.int@active.ident)
+```
+Neuronal clusters == 0, 1, 2, 3, 4, 5, 7, 8, 9, 11, 12
+
+Non-neuronal clusters == 6, 10
+
+## No-Glia clustering 
+
+```{r clustering no-glia}
+keepcells2=names(m.int@active.ident)[m.int@active.ident %in% c(0, 1, 2, 3, 4, 5, 7, 8, 9, 11, 12)]
+
+m.int2 <- CreateSeuratObject(counts = datlist[[spec]][keepgen,keepcells2], meta.data = metalist[[spec]][keepcells2,])
+m.int2 <- NormalizeData(object = m.int2)
+m.int2 <- ScaleData(object = m.int2, verbose = FALSE)
+m.int2 <- FindVariableFeatures(object = m.int2, selection.method = "vst",  nfeatures = 3000) #2000 for mouse and macaque
+m.int2 <- RunPCA(object = m.int2, npcs = 30, verbose = FALSE)
+set.seed(0)
+m.int2 <- RunTSNE(object = m.int2, reduction = "pca", dims = 1:30)
+m.int2 <- RunUMAP(object = m.int2, reduction = "pca", dims = 1:30)
+m.int2 <- FindNeighbors(object = m.int2, k.param = 8,dims=1:30)
+m.int2 <- FindClusters(object = m.int2, resolution = 0.5)
+
+```
+
+```{r plotting no glia }
+#DimPlot(m.int, group.by = c("external_donor_name", "ident", "roi"), ncol = 3)
+DimPlot(m.int2, group.by = "external_donor_name")
+DimPlot(m.int2, group.by = "ident")
+DimPlot(m.int2, group.by = "roi")
+
+FeaturePlot(m.int2,features=c("Snap25","Gad1","Slc32a1","Slc17a6"))
+plot<- DotPlot(m.int2,features=c("Gad2","Slc17a6","Slc17a7","Snap25","Aqp4","Ctss","Olig2","Opalin","Lamp5","Pdgfra","Chrna6"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+
+m.int2$Genes.Detected <- as.numeric(as.character(m.int2$Genes.Detected))
+m.int2$total_read <- as.numeric(as.character(m.int2$total_reads))
+
+VlnPlot(object = m.int2, features = c("Genes.Detected", "total_reads"))
+
+
+table(m.int2@active.ident)
+```
+```{r, fig.height=10}
+VlnPlot(object = m.int2, features = c("Gad2","Slc17a6","Snap25","Lamp5", "Chrna6", "Pvalb","Spata20", "Htr1a"))
+
+VlnPlot(object = m.int2, features = c("Aqp4","Ctss","Olig2","Opalin","Pdgfra"))
+
+```
+
+GABAergic == 2, 4, 5, 6, 8, 9, 10 
+
+
+Glutamatergic == 0,1,3,7,11,12
+
+
+
+## glutamatergic neurons
+```{r clustering Glut}
+keepcells3=names(m.int2@active.ident)[m.int2@active.ident %in% c(0,1,3,7,11,12)]
+
+
+m.int3 <- CreateSeuratObject(counts = datlist[[spec]][keepgen,keepcells3], meta.data = metalist[[spec]][keepcells3,])
+m.int3 <- NormalizeData(object = m.int3)
+m.int3 <- ScaleData(object=m.int3,verbose=FALSE)#,vars.to.regress = "external_donor_name_label")
+
+dimval=25
+
+m.int3 <- FindVariableFeatures(object = m.int3, selection.method = "vst", 
+                               nfeatures = 3000) #2000 for macaque and mouse
+m.int3 <- RunPCA(object = m.int3, npcs = 30, verbose = FALSE)
+set.seed(0)
+m.int3 <- RunTSNE(object = m.int3, reduction = "pca", dims = 1:dimval)
+m.int3 <- RunUMAP(object = m.int3, reduction = "pca", dims = 1:dimval)
+m.int3 <- FindNeighbors(object = m.int3, k.param = 8,dim=1:dimval)
+m.int3 <- FindClusters(object = m.int3, resolution = 0.4,dims=1:dimval) #0.2 
+
+```
+
+
+```{r plotting glut }
+#DimPlot(m.int, group.by = c("external_donor_name", "ident", "roi"), ncol = 3)
+DimPlot(m.int3, group.by = "external_donor_name")
+DimPlot(m.int3, group.by = "ident")
+DimPlot(m.int3, group.by = "roi")
+
+FeaturePlot(m.int3,features=c("Snap25","Slc17a6","Gad2","Neurod6","Scn4b"))
+
+
+plot<- DotPlot(m.int3,features=c("Snap25","Slc17a6","Gad2","Neurod6","Scn4b","Slc17a7", "Alyref","Dapk3","Zmynd19","Calb1","Kirrel3", "Necab1",))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+m.int3$Genes.Detected <- as.numeric(as.character(m.int3$Genes.Detected))
+m.int3$total_reads <- as.numeric(as.character(m.int3$total_reads))
+
+VlnPlot(object = m.int3, features = c("Genes.Detected", "total_reads"))
+
+
+tab <- table(m.int3@meta.data$roi,m.int3@active.ident)
+rbind(tab, Total = colSums(tab))
+
+```
+
+```{r, fig.height=10}
+VlnPlot(object = m.int3, features = c("Snap25","Slc17a6","Gad2","Neurod6","Scn4b","Slc17a7", "Alyref","Dapk3","Zmynd19","Zic4","Foxp2","Gbx2","Shox2","Calb1","Kirrel3" ))
+```
+
+LGN == 0, 1,2
+LP == 3
+Noise == 4
+LGv == 5
+
+## LGN
+```{r lgn clustering}
+keepcells4=names(m.int3@active.ident)[m.int3@active.ident %in% c(0,1,2)]
+
+m.int4 <- CreateSeuratObject(counts = datlist[[spec]][keepgen,keepcells4], meta.data = metalist[[spec]][keepcells4,])
+m.int4 <- NormalizeData(object = m.int4)
+m.int4 <- ScaleData(object = m.int4, verbose=FALSE)
+
+m.int4 <- FindVariableFeatures(object = m.int4, selection.method = "vst", 
+                               nfeatures = 3000)
+m.int4 <- RunPCA(object = m.int4, npcs = 30, verbose = FALSE)
+set.seed(0)
+m.int4 <- RunTSNE(object = m.int4, reduction = "pca", dims = 1:30)
+m.int4 <- RunUMAP(object = m.int4, reduction = "pca", dims = 1:30)
+m.int4 <- FindNeighbors(object = m.int4, k.param = 8, dims = 1:30)
+m.int4 <- FindClusters(object = m.int4, resolution = 0.3) #0.4 divides into 2 cluster core/shell
+```
+
+
+```{r plotting lgn }
+DimPlot(m.int4, group.by = "external_donor_name")
+DimPlot(m.int4, group.by = "ident")
+DimPlot(m.int4, group.by = "roi")
+
+FeaturePlot(m.int4,features=c("Snap25","Slc17a6","Scn4b","Slc17a7", "Necab1","Pvalb"))
+
+plot <- DotPlot(m.int4,features=c("Snap25","Slc17a6","Gad2","Neurod6","Scn4b","Slc17a7", "Necab1"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+m.int4$Genes.Detected <- as.numeric(as.character(m.int4$Genes.Detected))
+m.int4$total_reads <- as.numeric(as.character(m.int4$total_reads))
+
+VlnPlot(object = m.int4, features = c("Genes.Detected", "total_reads"))
+
+tab <- table(m.int4@meta.data$roi,m.int4@active.ident)
+rbind(tab, Total = colSums(tab))
+```
+
+
+
+
+## LP
+```{r LP clustering}
+
+keepcells5=names(m.int3@active.ident)[m.int3@active.ident %in% c(3,5)] 
+m.int5 <- CreateSeuratObject(counts = datlist[[spec]][keepgen,keepcells5], meta.data = metalist[[spec]][keepcells5,])
+m.int5 <- NormalizeData(object =m.int5)
+m.int5 <- ScaleData(object =m.int5, verbose = FALSE)
+
+m.int5 <- FindVariableFeatures(object =m.int5, selection.method = "vst", 
+                                top.genes = 2000) #2000 for macaque
+m.int5 <- RunPCA(object =m.int5, npcs = 30, verbose = FALSE)
+set.seed(0)
+dimval=30
+m.int5 <- RunTSNE(object =m.int5, reduction = "pca", dims = 1:dimval)
+m.int5 <- RunUMAP(object =m.int5, reduction = "pca", dims = 1:dimval) #30 for macaque and mouse, 5 for human
+m.int5 <- FindNeighbors(object =m.int5, k.param = 11, dims = 1:dimval)
+m.int5 <- FindClusters(object =m.int5, resolution = 0.1) 
+
+
+```
+
+
+
+```{r plotting LP }
+DimPlot(m.int5, group.by = "external_donor_name")
+DimPlot(m.int5, group.by = "ident")
+DimPlot(m.int5, group.by = "roi")
+
+FeaturePlot(m.int5,features=c("Slc17a6","Dapk3","Glra3", "Neurod6"))
+plot <- DotPlot(m.int5,features=c("Snap25","Slc17a6","Scn4b","Slc17a7", "Necab1","Pvalb"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+m.int5$Genes.Detected <- as.numeric(as.character(m.int5$Genes.Detected))
+m.int5$total_reads <- as.numeric(as.character(m.int5$total_reads))
+
+VlnPlot(object = m.int5, features = c("Genes.Detected", "total_reads"))
+
+table(m.int5@active.ident)
+
+```
+
+```{r}
+cl0 <- FindMarkers(m.int5, ident.1 = 0)
+```
+
+
+```{r, fig.height=10}
+VlnPlot(object = m.int5, features = c("Snap25","Slc17a6","Scn4b","Slc17a7","Calb1","Kirrel3","Opcml", "Zfp804b","Plekhg1", "Galntl6", "Cpne4", "Sox5" ))
+```
+
+
+##GABAergic clustering 
+```{r clustering gaba1}
+#keepcells=names(m.int2@active.ident)[m.int2@active.ident %in% c(2, 4)]
+keepcells6=names(m.int2@active.ident)[m.int2@active.ident %in% c(2, 4,5, 6, 8, 9, 10)]
+
+
+m.int6 <- CreateSeuratObject(counts = datlist[[spec]][keepgen,keepcells6], meta.data = metalist[[spec]][keepcells6,])
+m.int6 <- NormalizeData(object = m.int6)
+m.int6 <- ScaleData(object = m.int6, verbose = FALSE)
+m.int6 <- FindVariableFeatures(object = m.int6, selection.method = "vst", nfeatures = 3000) #2000 for mouse and macaque
+m.int6 <- RunPCA(object = m.int6, npcs = 30, verbose = FALSE)
+set.seed(0)
+dimval=15
+m.int6 <- RunTSNE(object = m.int6, reduction = "pca", dims = 1:dimval)
+m.int6 <- RunUMAP(object = m.int6, reduction = "pca", dims = 1:dimval)
+m.int6 <- FindNeighbors(object = m.int6, k.param = 5,dims=1:dimval)
+m.int6 <- FindClusters(object = m.int6, resolution = 0.1)
+
+table(m.int6@active.ident)
+```
+
+
+```{r plotting gaba }
+#DimPlot(m.int, group.by = c("external_donor_name", "ident", "roi"), ncol = 3)
+DimPlot(m.int6, group.by = "external_donor_name")
+DimPlot(m.int6, group.by = "ident")
+DimPlot(m.int6, group.by = "roi")
+
+FeaturePlot(m.int6,features=c("Gad2","Lamp5","Chrna6","Dscaml1"))
+plot<- DotPlot(m.int6,features=c("Gad2","Snap25","Slc17a6","Lamp5","Chrna6","Plac9a","Pax7","Dscaml1","Pvalb","Spata20","Rspo2","Dlx5","Cbln2","Shox2","Htr1a","Sox14"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+m.int6$Genes.Detected <- as.numeric(as.character(m.int6$Genes.Detected))
+m.int6$total_reads <- as.numeric(as.character(m.int6$total_reads))
+
+VlnPlot(object = m.int6, features = c("Genes.Detected", "total_reads"))
+
+tab <- table(m.int6@meta.data$roi,m.int6@active.ident)
+rbind(tab, Total = colSums(tab))
+```
+
+
+```{r, fig.height=10}
+VlnPlot(object = m.int6, features = c("Gad2","Snap25","Chrna6","Plac9a","Pax7","Dscaml1","Pvalb","Spata20","Rspo2","Dlx5","Cbln2","Shox2","Htr1a","Sox14","Dmbx1","Eltd1" ))
+```
+
+```{r}
+marker_ga <- FindAllMarkers(m.int6)
+```
+
+```{r, fig.height=10}
+VlnPlot(object = m.int6, features = c("Chrna6","Tspan5","Scgn","Igf1","Olfm3","Chrnb3","Styk1","Serpine2"))
+```
+
+# clustering Non-Neuronal
+```{r clustering nn}
+keepcells7=names(m.int@active.ident)[m.int@active.ident %in% c( 6, 10)]
+
+dimval=10
+
+m.int7 <- CreateSeuratObject(counts = datlist[[spec]][keepgen,keepcells7], meta.data = metalist[[spec]][keepcells7,])
+m.int7 <- NormalizeData(object = m.int7)
+m.int7 <- ScaleData(object = m.int7, verbose = FALSE)
+m.int7 <- FindVariableFeatures(object = m.int7, selection.method = "vst", nfeatures = 3000) #2000 for mouse and macaque
+m.int7 <- RunPCA(object = m.int7, npcs = 30, verbose = FALSE)
+set.seed(0)
+m.int7 <- RunTSNE(object = m.int7, reduction = "pca", dims = 1:dimval)
+m.int7 <- RunUMAP(object = m.int7, reduction = "pca", dims = 1:dimval)
+m.int7 <- FindNeighbors(object = m.int7, k.param = 5,dims=1:dimval)
+m.int7 <- FindClusters(object = m.int7, resolution = 0.2)
+
+table(m.int7@active.ident)
+```
+
+
+```{r plotting nn }
+#DimPlot(m.int, group.by = c("external_donor_name", "ident", "roi"), ncol = 3)
+DimPlot(m.int7, group.by = "external_donor_name")
+DimPlot(m.int7, group.by = "ident")
+DimPlot(m.int7, group.by = "roi")
+
+FeaturePlot(m.int7,features=c("Snap25","Olig2","Opalin","Mog"))
+plot<- DotPlot(m.int7,features=c("Snap25","Aqp4","Gfap","Aif1","Tmem119","Ms4a7","Olig2","Opalin","Pdgfra","Vcan","Cspg4"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+m.int7$Genes.Detected <- as.numeric(as.character(m.int7$Genes.Detected))
+m.int7$total_reads <- as.numeric(as.character(m.int7$total_reads))
+
+VlnPlot(object = m.int7, features = c("Genes.Detected", "total_reads"))
+
+
+
+tab <- table(m.int7@meta.data$roi,m.int7@active.ident)
+rbind(tab, Total = colSums(tab))
+```
+
+```{r}
+marker_nn <- FindAllMarkers(m.int7)
+```
+
+
+```{r, fig.height=10}
+VlnPlot(object = m.int7, features = c("Olig1","Olig2","Opalin","Ermn","Pdgfra","Bmp4","Vcan","Cspg4","Enpp6" ))
+```
+
+
+m.int4 - cl0 == LGN
+
+m.int3 - cl3 == LP
+
+m.int3 - cl5 == LGv
+
+m.int6 - cl0 == Chrna1
+
+m.int6 - cl1 == Chrna2
+
+m.int6 - cl2 == GABA1
+
+m.int6 - cl3 == GABA2
+
+m.int6 - cl4 == GABA3
+
+m.int6 - cl5 == Chrna5
+
+m.int6 - cl6 == GABA4
+
+m.int6 - cl7 == GABA5
+
+m.int6 - cl8 == GABA6
+
+m.int7 - cl0 == Oligo1
+
+m.int7 - cl1 == Oligo2
+
+m.int7 - cl2 == Oligo3
+
+
+
+```{r, echo=FALSE, eval = FALSE}
+save(m.int,m.int2,m.int3,m.int4, m.int5, m.int6,m.int7, file="../int_data/Clustering_Mouse.rda")
+```

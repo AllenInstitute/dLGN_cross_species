@@ -22,7 +22,13 @@ mac_dat2=Matrix(as.matrix(mac_dat))
 rownames(mac_dat2)=rownames(mac_dat)
 colnames(mac_dat2)=colnames(mac_dat)
 mac_dat2@x=mac_dat2@x/rep.int(Matrix::colSums(mac_dat2),diff(mac_dat2@p))*10^6
-samp.dat$donor=do.call(rbind,strsplit(samp.dat$external_donor_name,"\\."))[,1]
+
+donor <- read.csv("data/Macaque_donor_info.csv")
+#samp.dat$donor=do.call(rbind,strsplit(samp.dat$external_donor_name,"\\."))[,1]
+samp.dat <- left_join(samp.dat, donor)
+samp.dat <- samp.dat[samp.dat$exclude != "y",]
+rownames(samp.dat) <- samp.dat$exp_component_name
+mac_dat2 <- mac_dat2[,samp.dat$exp_component_name]
 datlist[["macaque"]]=mac_dat2
 metalist[["macaque"]]=data.frame(samp.dat)
 

@@ -1,0 +1,247 @@
+---
+title: "Macaque Anno"
+author: "Cy"
+date: "8/21/2020"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+```{r include=FALSE}
+library(dplyr)
+library(Seurat)
+library(ggplot2)
+library(cowplot)
+library(scrattch.hicat)
+library(feather)
+require(Matrix)
+require(scrattch.vis)
+library(SeuratWrappers)
+source("R_scripts/hicat_modules.r")
+
+load("int_data/collected_data_20200818.rda")
+load("int_data/Clustering_Macaque.rda")
+```
+
+
+### Generate annotation file
+
+```{r}
+spec="macaque"
+
+orthos=read.csv("data/ortholog_table_20191122.csv",as.is=T)
+nonlocgenes=orthos$rhesus_symbol[intersect(grep("^LOC",orthos$human_symbol,invert=T),grep("^LOC",orthos$rhesus_symbol))]
+keepgen=setdiff(rownames(datlist[[spec]]),setdiff(grep("^LOC|^MT-|^RPL|^RPS|^SNAR|^CT45|^MIR|^MTND|^TRNA",rownames(datlist[[spec]]),val=T),nonlocgenes))
+datlist[[spec]]=datlist[[spec]][keepgen,]
+datlist[[spec]]@x=datlist[[spec]]@x/rep.int(Matrix::colSums(datlist[[spec]]),diff(datlist[[spec]]@p))*10^6
+
+```
+
+```{r}
+allcl=data.frame(sample_name=colnames(m.int@assays$RNA),cluster_id=1,cluster_label=0,cluster_color="black",stringsAsFactors = F)
+rownames(allcl)=allcl$sample_name
+
+#Assign gabaergic cluster_labels
+allcl[colnames(m.int2@assays$RNA),"cluster_label"] <- paste0("GABA",m.int2@active.ident)
+
+#Assign class
+allcl$class_label[rownames(allcl) %in% colnames(m.int2@assays$RNA)] <- "GABA"
+
+#Assign glutamatergic cluster_labels
+#cluster 0: Parvo (FOXP2, IL15RA)
+#cluster 1: Magno (EBF1, IL15RA, FGF11)
+#cluster 2: Pulv (DAB2, GRIK3, PLPP4)
+#cluster 3: Konio (PRKCG, CAMK2A, CASQ2)
+#cluster 4: Konio (PRKCG, CAMK2A, CASQ2,DAB2)
+allcl[names(m.int3@active.ident)[m.int3@active.ident ==0],"cluster_label"] <- "P"
+allcl[names(m.int3@active.ident)[m.int3@active.ident ==1],"cluster_label"] <- "M"
+allcl[names(m.int3@active.ident)[m.int3@active.ident ==2],"cluster_label"] <- "Pulv"
+allcl[names(m.int3@active.ident)[m.int3@active.ident ==3],"cluster_label"] <- "K1"
+allcl[names(m.int3@active.ident)[m.int3@active.ident ==4],"cluster_label"] <- "K2"
+
+#Assign class
+allcl[colnames(m.int3@assays$RNA),"class_label"]="Glut"
+
+#Assign noise labels
+allcl[names(m.int@active.ident)[m.int@active.ident ==5],"cluster_label"] <- "Low Quality"
+allcl[names(m.int@active.ident)[m.int@active.ident ==5],"class_label"] <- "Low Quality"
+allcl$cluster_id[allcl$cluster_label == "Low Quality"] <- 10
+
+
+# assign order & colors
+allcl$cluster_id=match(allcl$cluster_label,c("GABA1","GABA2","GABA3","GABA4","K1","K2","M","P","Pulv", "Low Quality")) 
+allcl$cluster_color=rainbow(length(unique(allcl$cluster_label)),start=0,end=4/6)[as.numeric(as.factor(allcl$cluster_label))]
+
+
+# Add donor and roi info  
+allcl$donor=metalist[[spec]]$external_donor_name[match(allcl$sample_name,rownames(metalist[[spec]]))]
+allcl$roi=metalist[[spec]]$roi[match(allcl$sample_name,rownames(metalist[[spec]]))]
+allcl$gender=metalist[[spec]]$gender[match(allcl$sample_name,rownames(metalist[[spec]]))]
+allcl$age=metalist[[spec]]$age[match(allcl$sample_name,rownames(metalist[[spec]]))]
+allcl$species_label=metalist[[spec]]$species[match(allcl$sample_name,rownames(metalist[[spec]]))]
+
+save(allcl,file="int_data/macaque_allcl.rda")
+
+cl.df <- allcl %>% group_by(cluster_id, cluster_label, cluster_color, class_label) %>% summarise(n=n())
+
+```
+
+
+
+### UMAP plots - plot_objects
+```{r}
+allcl <- allcl[allcl$class_label != "Low Quality",]
+plot_objects=list()
+subcells=list()
+subcells[["all"]] <- allcl$sample_name
+subcells[["mp"]] <- subset(allcl$sample_name, allcl$cluster_label == "P" | allcl$cluster_label == "M")
+subdat=datlist[[spec]][,allcl$sample_name]
+subdat=sweep(subdat,2,Matrix::colSums(subdat),"/")*10^6
+for (nam in names(subcells)) {
+    keepcells=subcells[[nam]]
+    m.overall <- CreateSeuratObject(counts = subdat[,keepcells], meta.data = allcl[keepcells,])
+    m.overall <- NormalizeData(object =m.overall)
+    m.overall <- FindVariableFeatures(object =m.overall, selection.method = "vst", nfeatures = 3000)
+    m.overall <- RunFastMNN(object.list = SplitObject(m.overall, split.by = "donor"))
+    #m.overall <- RunPCA(object =m.overall, npcs = 30, verbose = TRUE)
+    m.overall <- RunTSNE(object =m.overall, reduction = "mnn", dims = 1:30)
+    m.overall <- RunUMAP(object =m.overall, reduction = "mnn", dims = 1:30)
+    plot_objects[[nam]]=m.overall
+    print(nam)
+  }
+
+save(plot_objects,file="int_data/macaque_plotobjects.rda")
+
+```
+
+
+```{r}
+
+DimPlot(plot_objects[["all"]], group.by = "donor")
+DimPlot(plot_objects[["all"]], group.by = "cluster_label")
+DimPlot(plot_objects[["all"]], group.by = "roi")
+
+DimPlot(plot_objects[["mp"]], group.by = "donor")
+DimPlot(plot_objects[["mp"]], group.by = "cluster_label")
+DimPlot(plot_objects[["mp"]], group.by = "roi")
+```
+
+
+```{r}
+#load("macaque_plotobjects.rda")
+pdf("analysis_output/macaque_dendrograms.pdf")
+  temp=plot_objects[["all"]]
+  for (dimval in 3:3) {
+    meanvals=matrix(0,ncol=dimval,nrow=length(unique(allcl$cluster_label)))
+    rownames(meanvals)=unique(allcl$cluster_label)[order(unique(allcl$cluster_id))]
+    for (ii in rownames(meanvals)) {
+      for (jj in 1:ncol(meanvals)) {
+        meanvals[ii,jj]=mean(temp@reductions$mnn@cell.embeddings[intersect(allcl$sample_name[allcl$cluster_label==ii],names(temp@active.ident)),jj])
+      }
+    }
+    distmat=dist((meanvals))
+    dend=as.dendrogram(hclust(distmat,method="ward.D2"))
+    dend=reorder(dend,(1:11)^2)
+    plot(dend,main=dimval)
+  }
+plot(dend)
+```
+
+```{r}
+new_order <- sapply(labels(dend), function(x,df){which(cl.df$cluster_label == x)}, df=cl.df)
+cl.df    <- cl.df[new_order,]
+
+cl.df$cl <- 1:nrow(cl.df)
+
+write.csv(cl.df, file="int_data/Macaque.cl.df.csv")
+## make adjustments / assign color vals using macro sheet
+```
+
+```{r}
+
+cl.df <- read.csv("int_data/Macaque.cl.df.csv")
+load("int_data/macaque_allcl.rda")
+
+colnames(allcl)[2] <- "org_cl.id"
+colnames(allcl)[10] <- "species"
+allcl <- allcl[, -c(3:5)]
+
+cl.df <- cl.df[,c(1:9,11)]
+allcl <- left_join(allcl,cl.df)
+
+allcl <- allcl[,c(1,8:16,2:7)]
+
+roi_palette <- read.csv("data/roi_palette.csv")
+allcl <- left_join(allcl, select(roi_palette, roi, roi_color, dissection_roi))
+
+save(allcl,file="int_data/macaque_anno.rda")
+
+```
+
+
+### UMAP plots - plot_objects updated anno
+```{r}
+plot_objects=list()
+subcells=list()
+subcells[["all"]] <- allcl$sample_name
+subcells[["mp"]] <- subset(allcl$sample_name, allcl$cluster_label == "P" | allcl$cluster_label == "M")
+subdat=datlist[[spec]][,allcl$sample_name]
+subdat=sweep(subdat,2,Matrix::colSums(subdat),"/")*10^6
+for (nam in names(subcells)) {
+    keepcells=subcells[[nam]]
+    m.overall <- CreateSeuratObject(counts = subdat[,keepcells], meta.data = allcl[keepcells,])
+    m.overall <- NormalizeData(object =m.overall)
+    m.overall <- FindVariableFeatures(object =m.overall, selection.method = "vst", nfeatures = 3000)
+    m.overall <- RunFastMNN(object.list = SplitObject(m.overall, split.by = "donor"))
+    #m.overall <- RunPCA(object =m.overall, npcs = 30, verbose = TRUE)
+    m.overall <- RunTSNE(object =m.overall, reduction = "mnn", dims = 1:30)
+    m.overall <- RunUMAP(object =m.overall, reduction = "mnn", dims = 1:30)
+    plot_objects[[nam]]=m.overall
+    print(nam)
+  }
+```
+
+```{r}
+allcl <- allcl[allcl$class_label != "Low Quality",]
+
+m.int <- CreateSeuratObject(counts = datlist[[spec]][,allcl$sample_name], meta.data = allcl[allcl$sample_name,])
+m.int <- NormalizeData(object = m.int)
+
+m.int <- ScaleData(object = m.int, verbose = FALSE)
+
+m.int <- FindVariableFeatures(object = m.int, selection.method = "vst", 
+                              nfeatures = 3000) #2000 for mouse and macaque
+m.int <- RunPCA(object = m.int, npcs = 30, verbose = FALSE)
+set.seed(0)
+m.int <- RunTSNE(object = m.int, reduction = "pca", dims = 1:30)
+m.int <- RunUMAP(object = m.int, reduction = "pca", dims = 1:30)
+m.int <- FindNeighbors(object = m.int, k.param = 8,dims=1:30)
+m.int <- FindClusters(object = m.int, resolution = 0.2) ##0.2 for macaque,0.4 for mouse
+
+plot_objects[["all_nobc"]]=m.int
+```
+
+
+```{r}
+
+DimPlot(plot_objects[["all"]], group.by = "donor")
+DimPlot(plot_objects[["all"]], group.by = "cluster_label")
+DimPlot(plot_objects[["all"]], group.by = "roi")
+
+DimPlot(plot_objects[["mp"]], group.by = "donor")
+DimPlot(plot_objects[["mp"]], group.by = "cluster_label")
+DimPlot(plot_objects[["mp"]], group.by = "roi")
+
+DimPlot(plot_objects[["all_nobc"]], group.by = "donor")
+DimPlot(plot_objects[["all_nobc"]], group.by = "cluster_label")
+DimPlot(plot_objects[["all_nobc"]], group.by = "roi")
+```
+
+```{r, eval = FALSE, echo = FALSE}
+
+save(plot_objects,file="int_data/macaque_plotobjects.rda")
+
+```
+

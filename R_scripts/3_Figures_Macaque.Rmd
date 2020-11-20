@@ -1,0 +1,460 @@
+---
+title: "3_Figures_Macaque"
+author: "Cy"
+date: "8/24/2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+
+```{r workspace}
+
+library(dplyr)
+library(Seurat)
+library(ggplot2)
+library(cowplot)
+library(scrattch.hicat)
+library(feather)
+require(Matrix)
+require(scrattch.vis)
+library(SeuratWrappers)
+library(dendextend)
+library(gridExtra)
+source("hicat_modules.r")
+```
+
+
+```{r}
+load("../int_data/collected_data_20200818.rda")
+load("../int_data/macaque_plotobjects.rda")
+load("../int_data/macaque_allcl.rda")
+
+allcl <- allcl[allcl$class_label != "Low Quality",]
+rownames(allcl) <- allcl$sample_name
+```
+
+
+# Plot dendrogram
+
+```{r, echo=TRUE}
+
+#pdf("../analysis_output/macaque_dendrograms.pdf")
+
+temp=plot_objects[["all"]]
+dimval=5
+
+meanvals=matrix(0,ncol=dimval,nrow=length(unique(allcl$cluster_label)))
+
+rownames(meanvals)=unique(allcl$cluster_label)[order(unique(allcl$cluster_id))]
+ 
+for (ii in rownames(meanvals)) {
+    for (jj in 1:ncol(meanvals)) {
+      meanvals[ii,jj]=mean(temp@reductions$mnn@cell.embeddings[intersect(allcl$sample_name[allcl$cluster_label==ii],names(temp@active.ident)),jj])
+    }
+}
+
+distmat=dist((meanvals))
+dend=as.dendrogram(hclust(distmat,method="ward.D2"))
+dend=reorder(dend,(1:11)^2)
+plot(dend,main=dimval)
+
+x <- allcl %>% group_by(cluster_id, cluster_label) %>% summarise(n=n())
+dend1 <- dend %>% set("labels", x$n) 
+plot(dend1)
+
+dev.off()
+
+#plot(dend)
+#plot(dend1)
+
+```
+
+# Violin plot
+```{r, echo=F}
+
+spec="macaque"
+  orthos=read.csv("../data/ortholog_table_20191122.csv",as.is=T)
+  nonlocgenes=orthos$rhesus_symbol[intersect(grep("^LOC",orthos$human_symbol,invert=T),grep("^LOC",orthos$rhesus_symbol))]
+  keepgen=setdiff(rownames(datlist[[spec]]),setdiff(grep("^LOC|^MT-|^RPL|^RPS|^SNAR|^CT45|^MIR|^MTND|^TRNA",rownames(datlist[[spec]]),val=T),nonlocgenes))
+  datlist[[spec]]=datlist[[spec]][keepgen,]
+  datlist[[spec]]@x=datlist[[spec]]@x/rep.int(Matrix::colSums(datlist[[spec]]),diff(datlist[[spec]]@p))*10^6
+  
+m.all <- plot_objects[["all"]]
+Idents(m.all) <- "cluster_label"
+
+m.mp <- plot_objects[["mp"]]
+Idents(m.mp) <- "cluster_label"
+
+m.nobc <- plot_objects[["all_nobc"]]
+Idents(m.nobc) <- "cluster_label"
+
+```
+
+```{r, echo=T}
+plot2 <- DotPlot(m.all,features=c("GAD2","LAMP5","DLX1","PVALB","KRT80","DSEL","VGF","GBP3","FBN2", "DNAH9"))
+plot2 + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+```
+```{r, echo=T,fig.height=8, fig.width=7}
+plot2 <- DotPlot(m.all,features=x[76:100]) + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +coord_flip()
+
+plot2
+```
+
+### Assign order & colors
+```{r, echo=F, fig.height=12, fig.width=5}
+
+#allcl$cluster_color <- cluster_palette$cluster_color[cluster_palette$species_label == "Macaque"][match(allcl$cluster_id, cluster_palette$cluster_id[cluster_palette$species_label == "Macaque"])]
+
+sampdat=data.frame(sample_name=allcl$sample_name,t(as.matrix(datlist[[spec]][,allcl$sample_name])))
+
+plot <- group_violin_plot(sampdat,
+                        allcl,
+                        grouping="cluster",
+                        genes=c("SNAP25", "GAD2", "SLC17A6",  #global
+                                "DLX1", "NPY","TNFAIP8L3", "LAMP5", #GABA1
+                                "CDH4", "KRT80", "PVALB", #GABA2
+                                "DSEL", "SYNPR" ,"SLITRK2", #GABA3
+                                "FBN2", "COL2A1", "NXPH2", #GABA4
+                                "EBF1", "FGF11", "ROBO3", #M
+                                "IL15RA", "FOXP2", #P
+                                "CASQ2","PRKCG", "CAMK2A",# K1
+                                "PENK", "SGCD","DAB2",# K2
+                                "GRIK3", "LHX2"# Pulv
+                                  ),
+                          log_scale=F,
+                          label_height=15,
+                          max_width=25)
+
+plot
+
+#ggsave(plot,file="../analysis_output/macaque_violin_plotv2.pdf",height=10,width=3, useDingbats=FALSE)
+```
+
+
+### UMAP plots ###
+```{r, eval=FALSE}
+
+temp=m.all
+dimval=20
+temp=RunUMAP(temp,reduction="mnn",dims=1:dimval, verbose=FALSE)
+DimPlot(temp, reduction = "umap", group.by = "donor",label=T)
+umap_all <- temp@reductions$umap@cell.embeddings
+
+temp=m.mp
+temp=RunUMAP(temp,reduction="pca",dims=1:15,verbose=FALSE)
+DimPlot(temp, reduction = "umap", group.by = "donor",label=T)
+umap_mp <- temp@reductions$umap@cell.embeddings
+
+
+temp=m.nobc
+dimval=25
+temp=RunUMAP(temp,reduction="pca",dims=1:dimval, verbose=FALSE)
+DimPlot(temp, reduction = "umap", group.by = "donor",label=T)
+umap_nobc <- temp@reductions$umap@cell.embeddings
+
+
+save(umap_all, umap_mp, umap_nobc, file="../analysis_output/macaque_umap.rda")  
+```
+
+```{r, eval=FALSE}
+for (dimval in c(5,10,15,20,25,30)) {
+  temp=RunUMAP(temp,reduction="mnn",dims=1:dimval)
+  DimPlot(temp, reduction = "umap", group.by = "donor",label=T)
+   }
+```
+
+## plotting UMAPs
+
+```{r plotting umaps}
+load("../analysis_output/macaque_umap.rda")
+
+clcol <- droplevels(unique(allcl[,c("cluster_id","cluster_label", "cluster_color")]))
+clcol <- clcol[order(clcol$cluster_id),]
+clcol <- setNames(clcol$cluster_color, clcol$cluster_label)
+
+donor_palette <- read.csv("../data/donor_palette.csv")
+
+donorcol <- unique(donor_palette[,c("donor","donor_color")])
+donorcol <- setNames(donorcol$donor_color,donorcol$donor)
+
+allcl$donor_roi <- paste0(allcl$donor,"_",allcl$dissection_roi)
+dcol <- setNames(donor_palette$donor_roi_color[donor_palette$species=="Macaque"], donor_palette$donor_roi[donor_palette$species=="Macaque"])
+
+rcol <- droplevels(unique(allcl[,c("dissection_roi","roi_color")]))
+rcol <- setNames(rcol$roi_color, rcol$dissection_roi)
+
+
+```
+
+### No batch correction data labeled with ROI, Donor, Cluster
+```{r}
+colnames(umap_nobc) = c("Lim1","Lim2")
+
+g1 <- plot_RD_meta(umap_nobc, factor(allcl[row.names(umap_nobc),] %>% pull(cluster_label),levels=names(clcol)), meta.col=clcol,alpha=0.5, cex=1.5)
+g1 <- g1+	ggtitle("cluster") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+#ggsave(g1, file=paste0(st,"macaque_umap_cluster.pdf"), height=5,width=5, useDingbats=FALSE)
+
+g2 <- plot_RD_meta(umap_nobc, factor(allcl[row.names(umap_nobc),] %>% pull(donor_roi),levels=names(dcol)), meta.col=dcol,alpha=0.5, cex=1.5)
+g2 <- g2 + ggtitle("donor/roi") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+#ggsave(g2, file=paste0(st,"macaque_umap_donor.roi.pdf"), height=5,width=5, useDingbats=FALSE)
+
+g3 <- g2 + facet_wrap(~meta)
+
+g2[["data"]]$roi <- allcl$roi
+g4 <- g2 + facet_wrap(~roi)
+
+
+g5 <- plot_RD_meta(umap_nobc, factor(allcl[row.names(umap_nobc),] %>% pull(dissection_roi),levels=names(rcol)), meta.col=rcol,alpha=0.5, cex=1.5)
+g5 <- g5 + ggtitle("roi") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+g6 <- g5 + facet_wrap(~meta)
+
+g5[["data"]]$donor <- allcl$donor
+g7 <- g5 + facet_wrap(~donor)
+
+g8 <- plot_RD_meta(umap_nobc, factor(allcl[row.names(umap_nobc),] %>% pull(donor),levels=names(donorcol)), meta.col=donorcol,alpha=0.5, cex=1.5)
+g8 <- g8 + ggtitle("donor") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+g9 <- g8 + facet_wrap(~meta)
+
+g1
+g2
+g3
+g4
+g5
+g6
+g7
+g8
+g9
+
+```
+
+```{r, eval=FALSE}
+ggsave(file="../analysis_output/macaque_umap_nobc.pdf",marrangeGrob(list(g1,g2,g5,g8),nrow = 1, ncol=1, top=NULL), height=4,width=4)
+
+ggsave(file="../analysis_output/macaque_umap_nobc_split.pdf",marrangeGrob(list(g3,g4,g6,g7,g9),nrow = 1, ncol=1, top=NULL), height=3,width=9)
+```
+
+### Batch corrected all data labeled with ROI, Donor, Cluster
+```{r}
+colnames(umap_all) = c("Lim1","Lim2")
+
+g1 <- plot_RD_meta(umap_all, factor(allcl[row.names(umap_all),] %>% pull(cluster_label),levels=names(clcol)), meta.col=clcol,alpha=0.5, cex=1.5)
+g1 <- g1+	ggtitle("cluster") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+#ggsave(g1, file=paste0(st,"macaque_umap_cluster.pdf"), height=5,width=5, useDingbats=FALSE)
+
+g2 <- plot_RD_meta(umap_all, factor(allcl[row.names(umap_all),] %>% pull(donor_roi),levels=names(dcol)), meta.col=dcol,alpha=0.5, cex=1.5)
+g2 <- g2 + ggtitle("donor/roi") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+#ggsave(g2, file=paste0(st,"macaque_umap_donor.roi.pdf"), height=5,width=5, useDingbats=FALSE)
+
+g3 <- g2 + facet_wrap(~meta)
+
+g2[["data"]]$roi <- allcl$roi
+g4 <- g2 + facet_wrap(~roi)
+
+
+g2 <- plot_RD_meta(umap_all, factor(allcl[row.names(umap_all),] %>% pull(donor_roi),levels=names(dcol)), meta.col=dcol,alpha=0.5, cex=1.5)
+g2 <- g2 + ggtitle("donor/roi") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+
+g5 <- plot_RD_meta(umap_all, factor(allcl[row.names(umap_all),] %>% pull(dissection_roi),levels=names(rcol)), meta.col=rcol,alpha=0.5, cex=1.5)
+g5 <- g5 + ggtitle("roi") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+g6 <- g5 + facet_wrap(~meta)
+
+g5[["data"]]$donor <- allcl$donor
+g7 <- g5 + facet_wrap(~donor)
+
+
+g8 <- plot_RD_meta(umap_all, factor(allcl[row.names(umap_all),] %>% pull(donor),levels=names(donorcol)), meta.col=donorcol,alpha=0.5, cex=1.5)
+g8 <- g8 + ggtitle("donor") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+g9 <- g8 + facet_wrap(~meta)
+
+
+g1
+g2
+g3
+g4
+g5
+g6
+g7
+g8
+g9
+```
+
+```{r, eval=FALSE}
+ggsave(file="../analysis_output/macaque_umap_all.pdf",marrangeGrob(list(g1,g2,g5,g8),nrow = 1, ncol=1, top=NULL), height=4,width=4)
+
+ggsave(file="../analysis_output/macaque_umap_all_split.pdf",marrangeGrob(list(g3,g4,g6,g7,g9),nrow = 1, ncol=1, top=NULL), height=3,width=9)
+```
+
+
+### Batch corrected MP data labeled with ROI, Donor, Cluster
+```{r}
+colnames(umap_mp) = c("Lim1","Lim2")
+
+g1 <- plot_RD_meta(umap_mp, factor(allcl[row.names(umap_mp),] %>% pull(cluster_label),levels=names(clcol)), meta.col=clcol,alpha=0.5, cex=1.5)
+g1 <- g1+	ggtitle("cluster") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+#ggsave(g1, file=paste0(st,"macaque_umap_cluster.pdf"), height=5,width=5, useDingbats=FALSE)
+
+g2 <- plot_RD_meta(umap_mp, factor(allcl[row.names(umap_mp),] %>% pull(donor_roi),levels=names(dcol)), meta.col=dcol,alpha=0.5, cex=1.5)
+g2 <- g2 + ggtitle("donor/roi") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+#ggsave(g2, file=paste0(st,"macaque_umap_donor.roi.pdf"), height=5,width=5, useDingbats=FALSE)
+
+g3 <- g2 + facet_wrap(~meta)
+
+g2[["data"]]$roi <- allcl$roi[match(rownames(g2[["data"]]), allcl$sample_name)]
+g4 <- g2 + facet_wrap(~roi)
+
+
+g2 <- plot_RD_meta(umap_mp, factor(allcl[row.names(umap_mp),] %>% pull(donor_roi),levels=names(dcol)), meta.col=dcol,alpha=0.5, cex=1.5)
+g2 <- g2 + ggtitle("donor/roi") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+
+g5 <- plot_RD_meta(umap_mp, factor(allcl[row.names(umap_mp),] %>% pull(dissection_roi),levels=names(rcol)), meta.col=rcol,alpha=0.5, cex=1.5)
+g5 <- g5 + ggtitle("roi") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+g6 <- g5 + facet_wrap(~meta)
+
+g5[["data"]]$donor <- allcl$donor[match(rownames(g2[["data"]]), allcl$sample_name)]
+g7 <- g5 + facet_wrap(~donor)
+
+g1
+g2
+g3
+g4
+g5
+g6
+g7
+
+```
+
+```{r, eval=FALSE}
+ggsave(file="../analysis_output/macaque_umap_mp.pdf",marrangeGrob(list(g1,g2,g5),nrow = 1, ncol=1, top=NULL), height=4,width=4)
+
+ggsave(file="../analysis_output/macaque_umap_mp_split.pdf",marrangeGrob(list(g3,g4,g6,g7),nrow = 1, ncol=1, top=NULL), height=3,width=9)
+```
+
+
+
+# Barplot showing dissection ROI distribution among clusters
+```{r barplot}
+roi_palette <- read.csv("../data/roi_palette.csv")
+allcl <- left_join(allcl, select(roi_palette, roi, roi_color, dissection_roi))
+
+allcl$cluster_label <- factor(allcl$cluster_label, levels=labels(dend))
+
+propvals <- allcl %>% 
+          group_by(cluster_label, dissection_roi) %>% 
+          summarise(n = n()) %>%
+          mutate(freq = n / sum(n))
+
+rcol <- setNames(roi_palette$roi_color[roi_palette$species=="Macaque"], roi_palette$dissection_roi[roi_palette$species=="Macaque"])
+
+p <- ggplot(propvals, aes(fill=dissection_roi, y=n, x=cluster_label)) + 
+    geom_bar(position="fill", stat="identity") +
+    #scale_fill_manual(values=rcol)
+    scale_fill_manual("ROI",values = c("#123466","#FF7F00","#BEBEBE")) +
+    ylab("Fraction of nuclei") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+    theme(axis.title.x = element_blank())
+
+p
+
+#ggsave(file="../analysis_output/macaque_roi_barplot.pdf", p, height = 3, width = 4, useDingbats=FALSE)
+```
+
+# plot heatmap of DE genes between clusters M and P  
+```{r heatmap prep}
+library(edgeR)
+
+mp1_nam=allcl$sample_name[allcl$cluster_label=="M"]
+mp2_nam=allcl$sample_name[allcl$cluster_label=="P"]
+
+classvec=as.factor(rep(c(1,2),times=c(length(mp1_nam),length(mp2_nam))))
+startmat_cpm=datlist[["macaque"]][,c(mp1_nam,mp2_nam)]
+e_design=model.matrix(~classvec)
+y2 = DGEList(counts=datlist[["macaque"]][,c(mp1_nam,mp2_nam)])
+y2 = estimateDisp(y2, e_design)
+fit = glmQLFit(y2, e_design)
+qlf.2vs1 <- glmQLFTest(fit, coef=2)
+outval2=topTags(qlf.2vs1,n=nrow(startmat_cpm),p.value=1)
+mean1=apply(startmat_cpm[rownames(outval2$table),classvec==1],1,mean)
+mean2=apply(startmat_cpm[rownames(outval2$table),classvec==2],1,mean)
+frac1=apply(startmat_cpm[rownames(outval2$table),classvec==1]>0,1,mean)
+frac2=apply(startmat_cpm[rownames(outval2$table),classvec==2]>0,1,mean)
+outval2$table=cbind(outval2$table,mean1,mean2,frac1,frac2)
+```
+
+```{r heatmap plot, fig.height=10}
+###heatmap of macaque genes###
+keepgendiff=outval2$table[abs(outval2$table$logFC)>1 & outval2$table$FDR<0.01 & (outval2$table$frac1>0.3 | outval2$table$frac2>0.3),]
+keepgendiff1=rownames(keepgendiff)[order(keepgendiff$logFC)[1:30]]
+keepgendiff2=rownames(keepgendiff)[order(-keepgendiff$logFC)[1:30]]
+require(gplots)
+expmat=datlist$macaque[c(keepgendiff1,keepgendiff2),c(mp1_nam,mp2_nam)]
+breakvals=seq(from=-2,to=2,length.out=256)
+colnames(expmat)=NULL
+
+#pdf("../analysis_output/macaque_mp_heatmap.pdf", height = 10, width=8)
+heatmap.2(log10(as.matrix(expmat+1)),
+          scale='row',
+          trace='none',
+          breaks=breakvals,
+          col=bluered(255),
+          ColSideColors=rep(c("#90caf9","#0d47a1"),
+                            times=c(length(mp1_nam),
+                            length(mp2_nam))),
+          labRow = rownames(expmat),
+          Rowv=F,
+          Colv=F,
+          dendrogram='none')
+#dev.off()
+
+```
+
+

@@ -1,0 +1,1204 @@
+---
+title: 'Integration: Human - Macaque'
+author: "Cy"
+date: "8/19/2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r}
+library(dplyr)
+library(Seurat)
+library(ggplot2)
+library(cowplot)
+library(scrattch.hicat)
+library(scrattch.vis)
+library(feather)
+require(Matrix)
+
+```
+
+```{r}
+load("../int_data/collected_data_20200818.rda")
+
+load("../int_data/macaque_allcl.rda")
+allcl_mac=allcl
+allcl_mac$cluster_label=paste0(allcl_mac$cluster_label,"_M")
+load("../int_data/human_allcl.rda")
+allcl_hum=allcl
+allcl_hum$cluster_label=paste0(allcl_hum$cluster_label,"_H")
+
+```
+
+
+```{r}
+
+spec="macaque"
+orthos=read.csv("../data/ortholog_table_20191122.csv",as.is=T)
+nonlocgenes=orthos$rhesus_symbol[intersect(grep("^LOC",orthos$human_symbol,invert=T),grep("^LOC",orthos$rhesus_symbol))]
+keepgen=setdiff(rownames(datlist[[spec]]),setdiff(grep("^LOC|^MT-|^RPL|^RPS|^SNAR|^CT45|^MIR|^MTND|^TRNA",rownames(datlist[[spec]]),val=T),nonlocgenes))
+datlist[[spec]]=datlist[[spec]][keepgen,]
+datlist[[spec]]@x=datlist[[spec]]@x/rep.int(Matrix::colSums(datlist[[spec]]),diff(datlist[[spec]]@p))*10^6
+spec="human"
+keepgen=grep("^LOC|^MT-|^RPL|^RPS|^SNAR|^CT45|^MIR|^MTND|[0-9]P$|-AS|-PS|DUX4L",rownames(datlist[[spec]]),val=T,invert=T)
+keepdons=which(metalist$human$external_donor_name_label %in% c("H200.1023","H200.1025","H200.1030"))
+datlist[[spec]]=datlist[[spec]][keepgen,keepdons]
+datlist[[spec]]@x=datlist[[spec]]@x/rep.int(Matrix::colSums(datlist[[spec]]),diff(datlist[[spec]]@p))*10^6
+
+```
+
+####integrate populations MP
+```{r}
+rownames(allcl_mac) <- allcl_mac$sample_name
+
+#mac_cls <- c("K1_M","K2_M","M_M","P_M")
+mac_cls <- c("M_M","P_M")
+
+keepcells_mac1=allcl_mac$sample_name[allcl_mac$donor=="Q17.27.002" & allcl_mac$cluster_label %in% mac_cls]
+  
+keepcells_mac2=allcl_mac$sample_name[allcl_mac$donor=="Q18.27.001" & allcl_mac$cluster_label %in% mac_cls]
+
+keepcells_mac3=allcl_mac$sample_name[allcl_mac$donor=="Q18.27.003" & allcl_mac$cluster_label %in% mac_cls]
+
+hum_cls <- c("K1_H","K2_H","MP_H")
+hum_cls <- c("MP_H")
+keepcells_hum<- allcl_hum$sample_name[allcl_hum$cluster_label %in% hum_cls]
+
+```
+
+```{r}
+
+
+keepcells_hum1 <- allcl_hum$sample_name[allcl_hum$donor=="H200.1023" & allcl_hum$cluster_label %in% hum_cls]
+keepcells_hum2 <- allcl_hum$sample_name[allcl_hum$donor=="H200.1025" & allcl_hum$cluster_label %in% hum_cls]
+keepcells_hum3 <- allcl_hum$sample_name[allcl_hum$donor=="H200.1030" & allcl_hum$cluster_label %in% hum_cls]
+
+```
+
+
+```{r, quietly=TRUE,warning = FALSE}
+obj.list = list()
+obj.list[["macaque1"]]=CreateSeuratObject(round(datlist[["macaque"]][,keepcells_mac1]),meta.data=allcl_mac[keepcells_mac1,])
+obj.list[["macaque2"]]=CreateSeuratObject(round(datlist[["macaque"]][,keepcells_mac2]),meta.data=allcl_mac[keepcells_mac2,])
+obj.list[["macaque3"]]=CreateSeuratObject(round(datlist[["macaque"]][,keepcells_mac3]),meta.data=allcl_mac[keepcells_mac3,])
+
+obj.list[["human1"]]=CreateSeuratObject(round(datlist[["human"]][,keepcells_hum1]),meta.data=allcl_hum[keepcells_hum1,])
+obj.list[["human2"]]=CreateSeuratObject(round(datlist[["human"]][,keepcells_hum2]),meta.data=allcl_hum[keepcells_hum2,])
+obj.list[["human3"]]=CreateSeuratObject(round(datlist[["human"]][,keepcells_hum3]),meta.data=allcl_hum[keepcells_hum3,])
+
+
+for (ii in 1:length(obj.list)) {
+  obj.list[[ii]] <- SCTransform(obj.list[[ii]], verbose = T)#, variable.features.n = 3000)
+}
+```
+
+
+
+```{r, quietly=TRUE,warning = FALSE}
+obj.list = list()
+obj.list[["macaque1"]]=CreateSeuratObject(round(datlist[["macaque"]][,keepcells_mac1]),meta.data=allcl_mac[keepcells_mac1,])
+obj.list[["macaque2"]]=CreateSeuratObject(round(datlist[["macaque"]][,keepcells_mac2]),meta.data=allcl_mac[keepcells_mac2,])
+obj.list[["macaque3"]]=CreateSeuratObject(round(datlist[["macaque"]][,keepcells_mac3]),meta.data=allcl_mac[keepcells_mac3,])
+obj.list[["human"]]=CreateSeuratObject(round(datlist[["human"]][,keepcells_hum]),meta.data=allcl_hum[keepcells_hum,])
+for (ii in 1:length(obj.list)) {
+  obj.list[[ii]] <- SCTransform(obj.list[[ii]], verbose = T)
+}
+```
+
+
+
+
+```{r}
+obj.anchors <- FindIntegrationAnchors(object.list = obj.list, dims = 1:30, k.filter=100)
+obj.integrated <- IntegrateData(anchorset = obj.anchors, dims = 1:30)
+
+```
+
+```{r}
+DefaultAssay(obj.integrated) <- "integrated"
+obj.integrated <- ScaleData(obj.integrated, verbose = FALSE)
+obj.integrated <- RunPCA(obj.integrated, npcs = 50, verbose = FALSE)
+
+dimval=10
+obj.integrated <- RunUMAP(obj.integrated, reduction = "pca", dims = 1:dimval)
+obj.integrated <- FindNeighbors(object = obj.integrated, k.param = 8,dims=1:dimval)
+obj.integrated = FindClusters(obj.integrated,resolution = 0.4)
+
+```
+
+```{r}
+DimPlot(obj.integrated,reduction="umap",label=T,group.by="cluster_label")
+DimPlot(obj.integrated,reduction="umap")
+DimPlot(obj.integrated,reduction="umap",label=T,group.by="donor")
+
+```
+
+```{r}
+for (dimval in 5:30) {
+  print(dimval)
+  obj.integrated <- RunUMAP(obj.integrated, reduction = "pca", dims = 1:dimval, verbose=F)
+  obj.integrated <- FindNeighbors(object = obj.integrated, k.param = 8,dims=1:dimval,verbose=F)
+  obj.integrated = FindClusters(obj.integrated,resolution = 0.4, verbose=F)
+  plot <- DimPlot(obj.integrated, reduction = "umap", group.by = "cluster_label",label=T)
+  plot <- plot+ggtitle(dimval)
+  print(plot)
+  
+  plot <- DimPlot(obj.integrated, reduction = "umap", group.by = "donor",label=T)
+  plot <- plot+ggtitle(dimval)
+  print(plot)
+  }
+```
+
+```{r}
+for (dimval in 30:50) {
+  print(dimval)
+  obj.integrated <- RunUMAP(obj.integrated, reduction = "pca", dims = 1:dimval, verbose=F)
+  obj.integrated <- FindNeighbors(object = obj.integrated, k.param = 8,dims=1:dimval,verbose=F)
+  obj.integrated = FindClusters(obj.integrated,resolution = 0.4, verbose=F)
+  plot <- DimPlot(obj.integrated, reduction = "umap", group.by = "cluster_label",label=T)
+  plot <- plot+ggtitle(dimval)
+  print(plot)
+  
+  plot <- DimPlot(obj.integrated, reduction = "umap", group.by = "donor",label=T)
+  plot <- plot+ggtitle(dimval)
+  print(plot)
+  }
+```
+
+
+
+```{r}
+dimval=24
+obj.integrated <- RunUMAP(obj.integrated, reduction = "pca", dims = 1:dimval)
+obj.integrated <- FindNeighbors(object = obj.integrated, k.param = 8,dims=1:dimval)
+obj.integrated = FindClusters(obj.integrated,resolution = 0.4)
+
+
+```
+```{r}
+DimPlot(obj.integrated,reduction="umap",label=T,group.by="cluster_label")
+DimPlot(obj.integrated,reduction="umap")
+
+```
+
+```{r, fig.height=12}
+FeaturePlot(obj.integrated,features=c("FOXP2","ST6GAL2","FOSB","ROBO2",
+                                      "EBF1", "EDIL3","CPNE4","PRKCE","TOX2"))
+
+```
+
+```{r}
+c0 <- FindMarkers(obj.integrated, ident.1 = 0)
+c0$diff <- c0$pct.1 - c0$pct.2
+
+c1 <- FindMarkers(obj.integrated, ident.1 = 1)
+```
+
+```{r}
+
+save(obj.integrated,file="../int_data/integrated_HuMa_mp.rda")
+```
+
+
+```{r}
+load("../int_data/integrated_HuMa_mp.rda")
+
+coords=obj.integrated@reductions$umap@cell.embeddings
+umap_mp_mh<-tibble::rownames_to_column(as.data.frame(coords), var="sample_name")
+
+colnames(allcl_mac)[c(13,18)] <- c("dissection_roi","roi")
+allcl <- full_join(allcl_hum, allcl_mac )
+
+```
+
+```{r}
+umap_mp_mh <- left_join(umap_mp_mh, allcl)
+
+umap_mp_mh <- umap_mp_mh[,c(2,3,1,4:24)] # for plot_RD_meta xy coords need to be in cols 1,2
+
+clcol <- unique(umap_mp_mh[,c("cluster_color","cluster_label")])
+clcol <- setNames(clcol$cluster_color, clcol$cluster_label)
+```
+
+
+## plotting greyed out populations
+
+```{r}
+
+umap_mp_m <- umap_mp_mh[umap_mp_mh$species_label == "Macaque",]
+umap_mp_h <- umap_mp_mh[umap_mp_mh$species_label == "Human",]
+
+clcol <- setNames(c("grey85","#90caf9","#0d47a1"),c("MP_H","M_M","P_M")) 
+
+g1 <- ggplot() +  
+          geom_point(data=umap_mp_h, aes(UMAP_1, y=UMAP_2, color=cluster_label), alpha=0.5,size=2, shape=19)  +  
+          geom_point(data=umap_mp_m, aes(x=UMAP_1, y=UMAP_2, color=cluster_label),alpha=0.75,size=2, shape=19)+ 
+         
+          scale_colour_manual(values=clcol)+ theme_void()+
+          #guides(colour = guide_legend(override.aes = list(size=5)))+  
+          coord_fixed(ratio=1) +
+          theme(legend.position="none") 
+
+clcol <- setNames(c("#2196F3","grey85","grey85"),c("MP_H","M_M","P_M")) 
+g2 <- ggplot() + 
+          geom_point(data=umap_mp_m, aes(x=UMAP_1, y=UMAP_2, color=cluster_label),alpha=0.5,size=2)+ 
+          geom_point(data=umap_mp_h, aes(UMAP_1, y=UMAP_2, color=cluster_label), alpha=0.75,size=2)  +  
+          scale_colour_manual(values=clcol)+ theme_void()+
+          #guides(colour = guide_legend(override.aes = list(size=5)))+     
+          coord_fixed(ratio=1) +
+          theme(legend.position="none") 
+
+clcol <- setNames(c("#FF7F00","#123466","#1E633B","grey85","grey85"),c("PC","MC","KC","M_M","P_M")) 
+g3 <- ggplot() + 
+          geom_point(data=umap_mp_m, aes(x=UMAP_1, y=UMAP_2, color=cluster_label),alpha=0.5,size=2)+ 
+          geom_point(data=umap_mp_h, aes(UMAP_1, y=UMAP_2, color=roi), alpha=0.75,size=2)  +  
+          scale_colour_manual(values=clcol)+ theme_void()+
+          #guides(colour = guide_legend(override.aes = list(size=5)))+    
+          coord_fixed(ratio=1) +
+          theme(legend.position="none") 
+
+g1
+g2
+g3
+```
+```{r}
+ggsave(file="../analysis_output/MacHu_int_umap.pdf",gridExtra::marrangeGrob(list(g1,g2,g3),nrow = 1, ncol=1), height=5,width=5,useDingbats=FALSE)
+```
+
+#### gene plot with other species greyed out
+```{r}
+select.genes = c("FOXP2","ST6GAL2","FOSB","ROBO2","EBF1", "EDIL3","CPNE4","CRH","SUSD2", "EPHA7","PRKCE","TOX2" )
+
+int_keepmac=umap_mp_m$sample_name
+int_keephum=umap_mp_h$sample_name
+
+
+norm.dat.m <- as.data.frame(t(as.matrix(datlist[["macaque"]][select.genes,int_keepmac])))
+#norm.dat.m <- tibble::rownames_to_column(norm.dat.m, var="sample_name")
+norm.dat.h <- as.data.frame(t(as.matrix(datlist[["human"]][select.genes,int_keephum])))
+#norm.dat.h <- tibble::rownames_to_column(norm.dat.h, var="sample_name")
+
+```
+
+```{r}
+
+plots.m <- list()
+
+rd.dat = as.data.frame(umap_mp_m)
+rownames(rd.dat) <- rd.dat$sample_name
+colnames(rd.dat)[1:2] = c("Dim1","Dim2")
+for(g in select.genes){
+  rd.dat$expr = norm.dat.m[row.names(rd.dat),g]
+  p=  ggplot() +
+        geom_point(data=umap_mp_h, aes(x=UMAP_1, y=UMAP_2),color="grey85",size=2, alpha=0.5) + 
+        geom_point(data=rd.dat, aes(Dim1, Dim2,color=expr),size=2, alpha=0.75)
+  p = p+ scale_color_gradient(low="gray60",high="red") 
+  p = p + theme_void() + theme(legend.position="none")
+  p = p + coord_fixed(ratio=1)
+  p = p + ggtitle(g)
+  plots.m[[g]]= p
+    }
+
+clcol <- setNames(c("grey85","#90caf9","#0d47a1"),c("MP_H","M_M","P_M")) 
+g <- ggplot() +  
+          geom_point(data=umap_mp_h, aes(UMAP_1, y=UMAP_2, color=cluster_label), alpha=0.5,size=2, shape=19)  +  
+          geom_point(data=umap_mp_m, aes(x=UMAP_1, y=UMAP_2, color=cluster_label),alpha=0.75,size=2, shape=19)+ 
+          scale_colour_manual(values=clcol)+ theme_void()+
+          theme(legend.position="none") +
+          coord_fixed(ratio=1) +
+          ggtitle("cluster")
+plots.m[["cl"]] <- g
+
+
+
+
+plots.h <- list()
+
+rd.dat = as.data.frame(umap_mp_h)
+rownames(rd.dat) <- rd.dat$sample_name
+colnames(rd.dat)[1:2] = c("Dim1","Dim2")
+for(g in select.genes){
+  rd.dat$expr = norm.dat.h[row.names(rd.dat),g]
+  p=  ggplot() +
+        geom_point(data=umap_mp_m, aes(x=UMAP_1, y=UMAP_2),color="grey85",size=2, alpha=0.5) + 
+        geom_point(data=rd.dat, aes(Dim1, Dim2,color=expr),size=2, alpha=0.75)
+  p = p+ scale_color_gradient(low="gray60",high="red") 
+  p = p + theme_void() + theme(legend.position="none")
+  p = p + coord_fixed(ratio=1)
+  p = p + ggtitle(g)
+  plots.h[[g]]= p
+    }
+
+clcol <- setNames(c("#2196F3","grey85","grey85"),c("MP_H","M_M","P_M")) 
+g <- ggplot() + 
+          geom_point(data=umap_mp_m, aes(x=UMAP_1, y=UMAP_2, color=cluster_label),alpha=0.5,size=2)+ 
+          geom_point(data=umap_mp_h, aes(UMAP_1, y=UMAP_2, color=cluster_label), alpha=0.75,size=2)  +  
+          scale_colour_manual(values=clcol)+ theme_void()+
+          theme(legend.position="none") +
+          coord_fixed(ratio=1) +
+          ggtitle("cluster")
+plots.h[["cl"]] <- g
+
+
+
+
+```
+
+
+ 
+```{r}
+ggsave(file="../analysis_output/MacHu_int_umap_gene_Mac.pdf",gridExtra::marrangeGrob(plots.m,nrow = 1, ncol=1, top=NULL), height=5,width=5,useDingbats=FALSE)
+
+ggsave(file="../analysis_output/MacHu_int_umap_gene_Hu.pdf",gridExtra::marrangeGrob(plots.h,nrow = 1, ncol=1), height=5,width=5,useDingbats=FALSE)
+
+
+```
+
+
+
+
+
+
+```{r}
+keepcells_mac=umap_mp_m$sample_name
+keepcells_hum=umap_mp_h$sample_name
+
+coords=obj.integrated@reductions$umap@cell.embeddings[,1:2]
+coords <- coords[umap_mp_mh$sample_name,]
+```
+
+```{r}
+require(Matrix)
+axis_genelists=list()
+
+
+### Macaque axis 
+mac_cells_axis1=coords[keepcells_mac,1]
+genvals=t(cor(mac_cells_axis1,as.matrix(t(obj.integrated@assays[["integrated"]]@data[,keepcells_mac])),method="spearman"))
+axis.genes <- as.data.frame(genvals)
+colnames(axis.genes) <- "Mac.axis1"
+axis_genelists[["macaque_axis1"]]=genvals
+
+
+### Macaque axis 2
+mac_cells_axis2=coords[keepcells_mac,2]
+genvals=t(cor(mac_cells_axis2,as.matrix(t(obj.integrated@assays[["integrated"]]@data[,keepcells_mac])),method="spearman"))
+axis.genes$"Mac.axis2" <- genvals
+axis_genelists[["macaque_axis2"]]=genvals
+
+
+### Human axis 1
+hum_cells_axis1=coords[keepcells_hum,1]
+genvals=t(cor(hum_cells_axis1,as.matrix(t(obj.integrated@assays[["integrated"]]@data[,keepcells_hum])),method="spearman"))
+axis.genes$"Hu.axis1" <- genvals
+axis_genelists[["human_axis1"]]=genvals
+
+
+### Human axis 2
+hum_cells_axis2=coords[keepcells_hum,2]
+genvals=t(cor(hum_cells_axis2,as.matrix(t(obj.integrated@assays[["integrated"]]@data[,keepcells_hum])),method="spearman"))
+axis.genes$"Hu.axis2" <- genvals
+axis_genelists[["human_axis2"]]=genvals
+```
+
+```{r}
+keepgenesplot <- axis.genes %>%
+        tibble::rownames_to_column('gene') %>%
+        filter_if(is.numeric, any_vars(. > 0.25 | .< -0.25))
+
+genesplot <- melt(keepgenesplot)
+genesplot$variable <- factor(genesplot$variable, levels=c("Mac.axis1","Hu.axis1", "Mac.axis2",  "Hu.axis2"))
+p.gene.cor <- ggplot(genesplot) + 
+      geom_tile(aes(y=reorder(gene, value,median, order=TRUE), x=variable, fill =value)) +
+      scale_fill_gradient(low = "#132B43", high ="#56B1F7")#, oob=squish) #"#8accff"
+
+
+x <- ggplot_build(p.gene.cor)
+gene.order.plot <- x[["layout"]][["panel_params"]][[1]][["y.sec"]][["limits"]]
+
+genes.to.plot <- head(gene.order.plot, 30) 
+genes.to.plot2 <- tail(gene.order.plot, 30)
+extra <- c("foxp2","robo2", "camk2a")
+genes.to.plot <- append(genes.to.plot,append(extra ,genes.to.plot2))
+genesplot.s <- genesplot[genesplot$gene %in% genes.to.plot,]
+p.gene.cor <- ggplot(genesplot.s) + 
+      geom_tile(aes(y=reorder(gene, value,median, order=TRUE), x=variable, fill =value)) +
+      scale_fill_gradient(low = "#132B43", high ="#56B1F7")#, oob=squish)
+```
+
+```{r}
+ggsave(file="HuMac_int_heatmap.pdf", p.gene.cor, height = 6, width = 4,useDingbats=FALSE )
+```
+
+
+
+
+
+####de genes scatter plot MP - Mac vs Hu###
+```{r}
+  
+
+require(feather)
+require(dplyr)
+require(WGCNA)
+require(gplots)
+require(edgeR)
+
+## human ##
+load("../int_data/human_plotobjects.rda")
+load("../int_data/human_allcl.rda")
+
+allcl <- allcl[allcl$class_label != "Low Quality",]
+rownames(allcl) <- allcl$sample_name
+
+
+m.mp <- plot_objects[["mp"]]
+Idents(m.mp) <- "cluster_label"
+meta <- m.mp@meta.data
+meta$donor <- droplevels(meta$donor)
+
+mdat <- as.matrix(m.mp@assays[["RNA"]]@counts)
+class1=meta$sample_name[meta$roi == "PC"]
+class2=meta$sample_name[meta$roi == "MC"]
+
+sel.cells <- append(class1,class2)
+mdat <- mdat[,sel.cells]
+
+classvals=as.factor(rep(c(1,2),times=c(length(class1),length(class2))))
+startmat=cpm(mdat)
+
+e_design=model.matrix(~classvals)
+y2 = DGEList(counts=mdat)
+
+y2$samples$lib.size <- colSums(y2$counts) #Re-compute the library sizes
+y2 <- calcNormFactors(y2,method="TMM") #Compute effective library sizes using "TMM","RLE","upperquartile","none" normalization
+
+y2 = estimateDisp(y2, e_design)
+fit = glmQLFit(y2, e_design)
+qlf.2vs1 <- glmQLFTest(fit, coef=2)
+outval2=topTags(qlf.2vs1,n=nrow(startmat),p.value=1)
+outval2$table=outval2$table[intersect(rownames(outval2$table),rownames(startmat)),]
+mean1=apply(startmat[rownames(outval2$table),classvals==1],1,mean)
+mean2=apply(startmat[rownames(outval2$table),classvals==2],1,mean)
+frac1=rowSums(startmat[rownames(outval2$table),classvals==1]>0)/length(class1)
+frac2=rowSums(startmat[rownames(outval2$table),classvals==2]>0)/length(class2)
+outmat_h=cbind(outval2$table,mean1,mean2,frac1,frac2)
+
+suboutmat_h <- outmat_h[outmat_h$FDR<0.05 & apply(outmat_h[,c("frac1","frac2")],1,max)>0.25,]
+
+
+
+
+design <- model.matrix(~ 0 + meta$roi + meta$donor )
+colnames(design) <- gsub("meta$roi", "", colnames(design), fixed = TRUE)
+colnames(design) <- gsub("meta$donor", "", colnames(design), fixed = TRUE)
+
+mdat <- as.matrix(m.mp@assays[["RNA"]]@counts)
+
+y = DGEList(counts=mdat)
+
+
+y <- estimateGLMCommonDisp(y, design)
+y <- estimateGLMTagwiseDisp(y, design)
+fit <- glmFit(y,design)
+results <- y$genes
+doLRT <- function(contrastName,des=design,ft=fit,myY=y,res=results) {
+	myContrast<-makeContrasts(contrasts=contrastName,levels=des)
+	lrt <- glmLRT(ft,contrast=myContrast)
+	p <- lrt$table$PValue
+	pname <- paste(contrastName,".p",sep="")
+	res[,pname] <- p
+	q <- topTags(lrt,n=length(p),adjust.method="BH",sort.by="none")
+	qname <- paste(contrastName,".q",sep="")
+	res[,qname] <- q$table$FDR
+	return(res)
+}
+
+test <- c("MC-PC")
+
+for (i in 1:length(tests)) {
+results <- doLRT(tests[i])
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## macaque ##
+load("../int_data/macaque_plotobjects.rda")
+load("../int_data/macaque_allcl.rda")
+
+m.mp <- plot_objects[["mp"]]
+Idents(m.mp) <- "cluster_label"
+meta <- m.mp@meta.data
+meta <- meta[meta$donor !="Q18.27.003",]
+
+mdat <- as.matrix(m.mp@assays[["RNA"]]@counts)
+class1=meta$sample_name[meta$roi == "Macaque LGN Parvocellular"]
+class2=meta$sample_name[meta$roi == "Macaque LGN Magnocellular"]
+
+sel.cells <- append(class1,class2)
+mdat <- mdat[,sel.cells]
+
+classvals=as.factor(rep(c(1,2),times=c(length(class1),length(class2))))
+startmat=cpm(mdat)
+
+e_design=model.matrix(~classvals)
+y2 = DGEList(counts=mdat)
+
+y2$samples$lib.size <- colSums(y$counts) #Re-compute the library sizes
+y2 <- calcNormFactors(y,method="TMM") #Compute effective library sizes using "TMM","RLE","upperquartile","none" normalization
+y2$samples
+
+y2 = estimateDisp(y2, e_design)
+fit = glmQLFit(y2, e_design)
+qlf.2vs1 <- glmQLFTest(fit, coef=2)
+outval2=topTags(qlf.2vs1,n=nrow(startmat),p.value=1)
+outval2$table=outval2$table[intersect(rownames(outval2$table),rownames(startmat)),]
+mean1=apply(startmat[rownames(outval2$table),classvals==1],1,mean)
+mean2=apply(startmat[rownames(outval2$table),classvals==2],1,mean)
+frac1=rowSums(startmat[rownames(outval2$table),classvals==1]>0)/length(class1)
+frac2=rowSums(startmat[rownames(outval2$table),classvals==2]>0)/length(class2)
+outmat_m=cbind(outval2$table,mean1,mean2,frac1,frac2)
+```
+
+
+```{r, fig.height=8, fig.width=8}
+colnames(outmat_h) <- paste0(colnames(outmat_h),"_h")
+outmat_h$gene <- rownames(outmat_h)
+
+colnames(outmat_m) <- paste0(colnames(outmat_m),"_m")
+outmat_m$gene <- rownames(outmat_m)
+
+outmat <- dplyr::inner_join(outmat_m,outmat_h, by="gene")
+
+dex.genes.subset <- subset(outmat, abs(logFC_h) > 1 | abs(logFC_m) > 1 |
+                             FDR_h < 0.05 | FDR_m < 0.05)
+
+cor1 <- round(cor(dex.genes.subset$logFC_m, dex.genes.subset$logFC_h), 2)
+```
+```{r, fig.height=8, fig.width=8}
+
+g.human.v.macaque <- ggplot(dex.genes.subset, aes(x = logFC_m, y = logFC_h)) +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) +
+  #geom_abline(slope = 1, intercept = 0) +
+  # geom_point(aes(size = -log10(adj.P.Val_h)), color = "grey90") +
+  geom_point(size = 1, color = "grey90") +
+  #geom_text(data = subset(dex.genes.subset, 
+  #                         xor(abs(logFC_m) > 1 & FDR_m < 0.05, 
+  #                             abs(logFC_h) > 1 & FDR_h < 0.05)),
+  #           aes(label = gene), size = 2, color = "grey30", show.legend = FALSE) +
+  geom_point(data = subset(dex.genes.subset, 
+                           xor(abs(logFC_m) > 1 & FDR_m < 0.05, 
+                               abs(logFC_h) > 1 & FDR_h < 0.05)),
+             size = 1, color = "grey70", show.legend = FALSE)+
+  geom_text(data = subset(dex.genes.subset, logFC_m > 1 & FDR_m < 0.05
+                          & logFC_h > 1 & FDR_h < 0.05),
+            aes(label = gene), size = 5, color = "blue", show.legend = FALSE) +
+  geom_text(data = subset(dex.genes.subset, logFC_m < -1 & FDR_m < 0.05 &
+                            logFC_h < -1 & FDR_h < 0.05),
+            aes(label = gene), size = 5, color = "orange", show.legend = FALSE) +
+  # geom_text(data = subset(dex.genes, adj.P.Val_min < 0.05 & 
+  #                           (abs(logFC_h) > 1 | abs(logFC_rh) > 1)), 
+  # aes(label = gene, size = 0.2), show.legend = FALSE) + 
+  geom_text(data = data.frame(x = c(-5, 5), y = c(-2.5, 3),
+                              text = c("PC > MC", "MC > PC")),
+            aes(x = x, y = y, label = text, size = 20, hjust = "inward"),
+            show.legend = FALSE) +
+  xlab("Macaque (log2 fold-difference)") +
+  ylab("Human (log2 fold-difference)") +
+  ggtitle(paste("Human vs. macaque magno/parvo markers - r =", cor1)) +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+plot(g.human.v.macaque)
+
+```
+```{r}
+
+ggsave(g.human.v.macaque, filename = "../output/human_v_macaque_dex.pdf", 
+       width = 8, height = 8)
+
+print("Magnocellular markers:")
+print(paste(subset(dex.genes.subset, logFC_rh > 1 & logFC_h > 1)$gene, collapse = ","))
+print("Parvocellular markers:")
+print(paste(subset(dex.genes.subset, logFC_rh < -1 & logFC_h < -1)$gene, collapse = ","))
+```
+
+
+
+
+
+
+#### Calculate human magno vs. parvo DEX genes
+```{r human-dex-genes, warning=FALSE}
+
+load("../int_data/human_plotobjects.rda")
+load("../int_data/human_allcl.rda")
+
+allcl <- allcl[allcl$class_label != "Low Quality",]
+rownames(allcl) <- allcl$sample_name
+
+
+m.mp <- plot_objects[["mp"]]
+Idents(m.mp) <- "cluster_label"
+meta <- m.mp@meta.data
+
+dex.genes.h <- list()
+
+# LGN DEX
+design <- model.matrix(~ 0 + meta$roi + meta$donor )
+colnames(design) <- gsub("meta$roi", "", colnames(design), fixed = TRUE)
+colnames(design) <- gsub("meta$donor", "", colnames(design), fixed = TRUE)
+
+mdat <- as.matrix(m.mp@assays[["RNA"]]@counts)
+
+fit <- lmFit(mdat, design)
+for (contrast1 in c("MC-PC")) {
+  cont.matrix <- makeContrasts(contrasts=contrast1, levels = design)
+  fit2 <- eBayes(contrasts.fit(fit, cont.matrix))
+  top1 <- topTable(fit2, number = Inf, p.value = 1, 
+                   adjust = "BH", sort.by = "none")
+  top1$gene <- row.names(top1)
+  dex.genes.h[[contrast1]] <- top1
+}
+
+# Human magno vs. parvo (by donor)
+for (donor1 in unique(meta$donor)) {
+  keep.h.donor <- which(meta$donor == donor1)
+  expr.h.donor <- mdat[, keep.h.donor]
+  samp.h.donor <- droplevels(meta[keep.h.donor, ])
+  
+  # LGN DEX
+  design <- model.matrix(~ 0 + samp.h.donor$roi )
+  colnames(design) <- gsub("samp.h.donor$roi", "", colnames(design), fixed = TRUE)
+  fit <- lmFit(expr.h.donor, design)
+  
+  cont.matrix <- makeContrasts(contrasts="MC-PC", levels = design)
+  fit2 <- eBayes(contrasts.fit(fit, cont.matrix))
+  top1 <- topTable(fit2, number = Inf, p.value = 1, 
+                   adjust = "BH", sort.by = "none")
+  top1$gene <- row.names(top1)
+  colnames(top1) <- paste0(colnames(top1), "_", donor1)
+  dex.genes.h[["MC-PC"]] <- cbind(dex.genes.h[["MC-PC"]], top1)
+}
+
+```
+
+#### Compare human donor DEX genes
+```{r compare-human-donor-dex, fig.width = 8, fig.height = 8}
+sig.genes <- which(dex.genes.h[["MC-PC"]]$adj.P.Val < 0.05 &
+                               abs(dex.genes.h[["MC-PC"]]$logFC) > 1)
+col.genes <- ifelse(dex.genes.h[["MC-PC"]]$logFC[sig.genes] > 0, "blue", "orange")
+logfc.cols <- grep("logFC", colnames(dex.genes.h[["MC-PC"]]))
+
+
+pdf(file = "../output/human_magno_parvo_bydonor.pdf", width = 5, height = 5)
+pairs(dex.genes.h[["MC-PC"]][sig.genes, logfc.cols],
+      main = "Consistent magno vs. parvo DEX across human donors", 
+      upper.panel = NULL, las = 1, col = col.genes)
+
+for (col1 in logfc.cols[-1]) {
+  plot(dex.genes.h[["MC-PC"]][sig.genes, logfc.cols[1]],
+       dex.genes.h[["MC-PC"]][sig.genes, col1],
+       xlab = "Joint donor log2FC", 
+       ylab = colnames(dex.genes.h[["MC-PC"]])[col1], 
+       main = "Magno vs. Parvo", las = 1, col = col.genes)
+  
+  plot(dex.genes.h[["MC-PC"]][sig.genes, logfc.cols[1]],
+       dex.genes.h[["MC-PC"]][sig.genes, col1],
+       xlab = "Joint donor log2FC", 
+       ylab = colnames(dex.genes.h[["MC-PC"]])[col1], 
+       main = "Magno vs. Parvo", type = "n", las = 1)
+  text(dex.genes.h[["MC-PC"]][sig.genes, logfc.cols[1]],
+       dex.genes.h[["MC-PC"]][sig.genes, col1],
+       labels = row.names(dex.genes.h[["MC-PC"]])[sig.genes],
+       cex = 1, col = col.genes)
+}
+
+dev.off()
+
+
+```
+
+
+
+#### Calculate macaque magno vs. parvo DEX genes (snRNA-seq)
+```{r macaque-nuc-dex-genes, fig.width = 5, fig.height=5}
+load("../int_data/macaque_plotobjects.rda")
+load("../int_data/macaque_allcl.rda")
+
+m.mp <- plot_objects[["mp"]]
+Idents(m.mp) <- "cluster_label"
+meta <- m.mp@meta.data
+
+mdat <- as.matrix(m.mp@assays[["RNA"]]@counts)
+
+dex.genes.rh.nuc <- list()
+
+
+# MC/PC DEX
+design <- model.matrix(~ 0 + meta$roi + meta$donor)
+colnames(design) <- gsub("meta$roiMacaque LGN ", "", colnames(design), fixed = TRUE)
+colnames(design) <- gsub("meta$donor", "", colnames(design), fixed = TRUE)
+
+fit <- lmFit(mdat, design)
+for (contrast1 in c("Magnocellular-Parvocellular")) {
+  cont.matrix <- makeContrasts(contrasts=contrast1, levels = design)
+  fit2 <- eBayes(contrasts.fit(fit, cont.matrix))
+  top1 <- topTable(fit2, number = Inf, p.value = 1, 
+                   adjust = "BH", sort.by = "none")
+  top1$gene <- row.names(top1)
+  dex.genes.rh.nuc[[contrast1]] <- top1
+}
+
+
+# MC/PC DEX (by donor)
+for (donor1 in unique(meta$donor)) {
+  keep.rh.nuc.donor <- which(meta$donor == donor1)
+  expr.rh.nuc.donor <- mdat[, keep.rh.nuc.donor]
+  samp.rh.nuc.donor <- droplevels(meta[keep.rh.nuc.donor, ])
+  
+  # LGN DEX
+  design <- model.matrix(~ 0 + samp.rh.nuc.donor$roi)
+  colnames(design) <- gsub("samp.rh.nuc.donor$roiMacaque LGN ", "", colnames(design), fixed = TRUE)
+  fit <- lmFit(expr.rh.nuc.donor, design)
+  
+  cont.matrix <- makeContrasts(contrasts="Magnocellular-Parvocellular", levels = design)
+  fit2 <- eBayes(contrasts.fit(fit, cont.matrix))
+  top1 <- topTable(fit2, number = Inf, p.value = 1, 
+                   adjust = "BH", sort.by = "none")
+  top1$gene <- row.names(top1)
+  colnames(top1) <- paste0(colnames(top1), "_", donor1)
+  dex.genes.rh.nuc[["Magnocellular-Parvocellular"]] <- cbind(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]], top1)
+}
+
+
+# Donor DEX
+design <- model.matrix(~ 0 + meta$donor + meta$roi)
+colnames(design) <- gsub("meta$roiMacaque LGN ", "", colnames(design), fixed = TRUE)
+colnames(design) <- gsub("meta$donor", "", colnames(design), fixed = TRUE)
+
+fit <- lmFit(mdat, design)
+for (contrast1 in c("Q17.27.002-Q18.27.001")) {
+  cont.matrix <- makeContrasts(contrasts=contrast1, levels = design)
+  fit2 <- eBayes(contrasts.fit(fit, cont.matrix))
+  top1 <- topTable(fit2, number = Inf, p.value = 1, 
+                   adjust = "BH", sort.by = "none")
+  top1$gene <- row.names(top1)
+  dex.genes.rh.nuc[[contrast1]] <- top1
+}
+
+
+
+
+sig.genes <- which(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]]$adj.P.Val < 0.05 &
+                               abs(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]]$logFC) > 1)
+col.genes <- ifelse(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]]$logFC[sig.genes] > 0, "blue", "orange")
+logfc.cols <- grep("logFC", colnames(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]]))
+
+
+pdf(file = "../output/macaque_magno_parvo_bydonor.pdf", width = 5, height = 5)
+pairs(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]][sig.genes, logfc.cols],
+      main = "Consistent magno vs. parvo DEX across macaque donors", 
+      upper.panel = NULL, las = 1, col = col.genes)
+
+for (col1 in logfc.cols[-1]) {
+  plot(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]][sig.genes, logfc.cols[1]],
+       dex.genes.rh.nuc[["Magnocellular-Parvocellular"]][sig.genes, col1],
+       xlab = "Joint donor log2FC", 
+       ylab = colnames(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]])[col1], 
+       main = "Magno vs. Parvo", las = 1, col = col.genes)
+  
+  plot(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]][sig.genes, logfc.cols[1]],
+       dex.genes.rh.nuc[["Magnocellular-Parvocellular"]][sig.genes, col1],
+       xlab = "Joint donor log2FC", 
+       ylab = colnames(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]])[col1], 
+       main = "Magno vs. Parvo", type = "n", las = 1)
+  text(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]][sig.genes, logfc.cols[1]],
+       dex.genes.rh.nuc[["Magnocellular-Parvocellular"]][sig.genes, col1],
+       labels = row.names(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]])[sig.genes],
+       cex = 0.3, col = col.genes)
+}
+
+plot(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]]$logFC_Q17.27.002,
+     dex.genes.rh.nuc[["Magnocellular-Parvocellular"]]$logFC_Q18.27.001,
+     xlab = "Q17.27.002 log2FC", ylab = "Q18.27.001 log2FC", 
+     main = "Magno vs. Parvo", las = 1)
+abline(h = c(-1, 0, 1), lty = c(2, 1, 2))
+abline(v = c(-1, 0, 1), lty = c(2, 1, 2))
+dev.off()
+
+```
+
+#### Compare Macaque donor DEX genes
+```{r compare-macaque-donor-dex, fig.width = 8, fig.height = 8}
+pairs(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]][
+  dex.genes.rh.nuc[["Magnocellular-Parvocellular"]]$adj.P.Val < 0.05 &
+    abs(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]]$logFC) > 1,
+  grep("logFC", colnames(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]]))
+],
+main = "Consistent magno vs. parvo DEX across macaque donors",
+upper.panel = NULL
+)
+
+print("Magnocellular markers:")
+print(paste(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]]$gene[order(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]]$logFC, decreasing = TRUE)][1:20], collapse = ","))
+print("Parvocellular markers:")
+print(paste(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]]$gene[order(dex.genes.rh.nuc[["Magnocellular-Parvocellular"]]$logFC, decreasing = FALSE)][1:20], collapse = ","))
+
+```
+
+```{r plot-macaque-volcano}
+top1 <- dex.genes.rh.nuc[["Magnocellular-Parvocellular"]]
+top2 <- subset(top1, abs(logFC) > 2)
+write.csv(top1, file = "../output/mc_pc_de_genes.csv")
+
+plot(top1$logFC, -log10(top1$adj.P.Val), col = "grey90")
+text(top2$logFC, -log10(top2$adj.P.Val), labels = row.names(top2), cex = 0.7)
+abline(h = -log10(0.05))
+abline(v = c(-1, 1))
+
+```
+
+
+
+
+#### Human vs. macaque snRNA-seq
+```{r compare-human-macaque-nuc, fig.width = 8, fig.height = 8}
+dex.genes <- merge(dex.genes.h[["MC-PC"]], dex.genes.rh.nuc[["Magnocellular-Parvocellular"]], 
+                   by = "gene", suffixes = c("_h", "_rh"))
+dex.genes$adj.P.Val_min <- apply(dex.genes[, c("adj.P.Val_h", "adj.P.Val_rh")], 1, min)
+dex.genes$adj.P.Val_max <- apply(dex.genes[, c("adj.P.Val_h", "adj.P.Val_rh")], 1, max)
+write.csv(dex.genes, file = "../analysis_output/human_macaque_mc_pc_de_genes.csv",
+          row.names = FALSE)
+
+dex.genes.subset <- subset(dex.genes, abs(logFC_h) > 1 | abs(logFC_rh) > 1 |
+                             adj.P.Val_h < 0.05 | adj.P.Val_rh < 0.05)
+
+cor1 <- round(cor(dex.genes.subset$logFC_rh, dex.genes.subset$logFC_h), 2)
+
+g.human.v.macaque <- ggplot(dex.genes.subset, aes(x = logFC_rh, y = logFC_h)) +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) +
+  geom_abline(slope = 1, intercept = 0) +
+  # geom_point(aes(size = -log10(adj.P.Val_h)), color = "grey90") +
+  geom_point(size = 1, color = "grey90") +
+  geom_text(data = subset(dex.genes.subset, xor(abs(logFC_rh) > 1 & adj.P.Val_rh < 0.05, 
+                                                abs(logFC_h) > 1 & adj.P.Val_h < 0.05)),
+            aes(label = gene), size = 2, color = "grey30", show.legend = FALSE) +
+  geom_text(data = subset(dex.genes.subset, logFC_rh > 1 & adj.P.Val_rh < 0.05
+                          & logFC_h > 1 & adj.P.Val_h < 0.05),
+            aes(label = gene), size = 5, color = "blue", show.legend = FALSE) +
+  geom_text(data = subset(dex.genes.subset, logFC_rh < -1 & adj.P.Val_rh < 0.05 &
+                            logFC_h < -1 & adj.P.Val_h < 0.05),
+            aes(label = gene), size = 5, color = "orange", show.legend = FALSE) +
+  # geom_text(data = subset(dex.genes, adj.P.Val_min < 0.05 & 
+  #                           (abs(logFC_h) > 1 | abs(logFC_rh) > 1)), 
+  # aes(label = gene, size = 0.2), show.legend = FALSE) +
+  geom_text(data = data.frame(x = c(-5, 5), y = c(-2.5, 3),
+                              text = c("PC > MC", "MC > PC")),
+            aes(x = x, y = y, label = text, size = 20, hjust = "inward"),
+            show.legend = FALSE) +
+  xlab("Macaque (log2 fold-difference)") +
+  ylab("Human (log2 fold-difference)") +
+  ggtitle(paste("Human vs. macaque magno/parvo markers - r =", cor1)) +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+
+plot(g.human.v.macaque)
+
+ggsave(g.human.v.macaque, filename = "../output/human_v_macaque_dex.pdf", 
+       width = 8, height = 8)
+
+print("Magnocellular markers:")
+print(paste(subset(dex.genes.subset, logFC_rh > 1 & logFC_h > 1)$gene, collapse = ","))
+print("Parvocellular markers:")
+print(paste(subset(dex.genes.subset, logFC_rh < -1 & logFC_h < -1)$gene, collapse = ","))
+```
+
+
+
+
+####integrate ALL populations
+```{r}
+rownames(allcl_mac) <- allcl_mac$sample_name
+allcl_mac <- allcl_mac[allcl_mac$class_label != "Low Quality",]
+
+keepcells_mac1=allcl_mac$sample_name[allcl_mac$donor=="Q17.27.002"] 
+  
+keepcells_mac2=allcl_mac$sample_name[allcl_mac$donor=="Q18.27.001" ]
+
+keepcells_mac3=allcl_mac$sample_name[allcl_mac$donor=="Q18.27.003" ]
+
+```
+
+```{r}
+
+allcl_hum <- allcl_hum[allcl_hum$class_label != "Non-Neuronal",]
+
+keepcells_hum1 <- allcl_hum$sample_name[allcl_hum$donor=="H200.1023" ]
+keepcells_hum2 <- allcl_hum$sample_name[allcl_hum$donor=="H200.1025" ]
+keepcells_hum3 <- allcl_hum$sample_name[allcl_hum$donor=="H200.1030" ]
+
+```
+
+
+```{r, quietly=TRUE,warning = FALSE}
+obj.list = list()
+obj.list[["macaque1"]]=CreateSeuratObject(round(datlist[["macaque"]][,keepcells_mac1]),meta.data=allcl_mac[keepcells_mac1,])
+obj.list[["macaque2"]]=CreateSeuratObject(round(datlist[["macaque"]][,keepcells_mac2]),meta.data=allcl_mac[keepcells_mac2,])
+obj.list[["macaque3"]]=CreateSeuratObject(round(datlist[["macaque"]][,keepcells_mac3]),meta.data=allcl_mac[keepcells_mac3,])
+
+obj.list[["human1"]]=CreateSeuratObject(round(datlist[["human"]][,keepcells_hum1]),meta.data=allcl_hum[keepcells_hum1,])
+obj.list[["human2"]]=CreateSeuratObject(round(datlist[["human"]][,keepcells_hum2]),meta.data=allcl_hum[keepcells_hum2,])
+obj.list[["human3"]]=CreateSeuratObject(round(datlist[["human"]][,keepcells_hum3]),meta.data=allcl_hum[keepcells_hum3,])
+
+
+for (ii in 1:length(obj.list)) {
+  obj.list[[ii]] <- SCTransform(obj.list[[ii]], verbose = T)#, variable.features.n = 3000)
+}
+```
+
+
+
+```{r, quietly=TRUE,warning = FALSE}
+keepcells_hum<- allcl_hum$sample_name
+
+
+obj.list = list()
+obj.list[["macaque1"]]=CreateSeuratObject(round(datlist[["macaque"]][,keepcells_mac1]),meta.data=allcl_mac[keepcells_mac1,])
+obj.list[["macaque2"]]=CreateSeuratObject(round(datlist[["macaque"]][,keepcells_mac2]),meta.data=allcl_mac[keepcells_mac2,])
+obj.list[["macaque3"]]=CreateSeuratObject(round(datlist[["macaque"]][,keepcells_mac3]),meta.data=allcl_mac[keepcells_mac3,])
+obj.list[["human"]]=CreateSeuratObject(round(datlist[["human"]][,keepcells_hum]),meta.data=allcl_hum[keepcells_hum,])
+for (ii in 1:length(obj.list)) {
+  obj.list[[ii]] <- SCTransform(obj.list[[ii]], verbose = T)
+}
+```
+
+
+
+
+```{r}
+obj.anchors <- FindIntegrationAnchors(object.list = obj.list, dims = 1:30, k.filter=100)
+obj.integrated <- IntegrateData(anchorset = obj.anchors, dims = 1:30)
+
+```
+
+```{r}
+DefaultAssay(obj.integrated) <- "integrated"
+obj.integrated <- ScaleData(obj.integrated, verbose = FALSE)
+obj.integrated <- RunPCA(obj.integrated, npcs = 50, verbose = FALSE)
+
+dimval=10
+obj.integrated <- RunUMAP(obj.integrated, reduction = "pca", dims = 1:dimval)
+obj.integrated <- FindNeighbors(object = obj.integrated, k.param = 8,dims=1:dimval)
+obj.integrated = FindClusters(obj.integrated,resolution = 0.4)
+
+```
+
+```{r}
+DimPlot(obj.integrated,reduction="umap",label=T,group.by="cluster_label")
+DimPlot(obj.integrated,reduction="umap")
+DimPlot(obj.integrated,reduction="umap",label=T,group.by="donor")
+
+```
+
+```{r}
+for (dimval in 5:30) {
+  print(dimval)
+  obj.integrated <- RunUMAP(obj.integrated, reduction = "pca", dims = 1:dimval, verbose=F)
+  obj.integrated <- FindNeighbors(object = obj.integrated, k.param = 8,dims=1:dimval,verbose=F)
+  obj.integrated = FindClusters(obj.integrated,resolution = 0.4, verbose=F)
+  plot <- DimPlot(obj.integrated, reduction = "umap", group.by = "cluster_label",label=T)
+  plot <- plot+ggtitle(dimval)
+  print(plot)
+  
+  plot <- DimPlot(obj.integrated, reduction = "umap", group.by = "donor",label=T)
+  plot <- plot+ggtitle(dimval)
+  print(plot)
+  }
+```
+
+```{r}
+for (dimval in 30:50) {
+  print(dimval)
+  obj.integrated <- RunUMAP(obj.integrated, reduction = "pca", dims = 1:dimval, verbose=F)
+  obj.integrated <- FindNeighbors(object = obj.integrated, k.param = 8,dims=1:dimval,verbose=F)
+  obj.integrated = FindClusters(obj.integrated,resolution = 0.4, verbose=F)
+  plot <- DimPlot(obj.integrated, reduction = "umap", group.by = "cluster_label",label=T)
+  plot <- plot+ggtitle(dimval)
+  print(plot)
+  
+  plot <- DimPlot(obj.integrated, reduction = "umap", group.by = "donor",label=T)
+  plot <- plot+ggtitle(dimval)
+  print(plot)
+  }
+```
+
+
+
+```{r}
+dimval=24
+obj.integrated <- RunUMAP(obj.integrated, reduction = "pca", dims = 1:dimval)
+obj.integrated <- FindNeighbors(object = obj.integrated, k.param = 8,dims=1:dimval)
+obj.integrated = FindClusters(obj.integrated,resolution = 0.4)
+
+
+```
+```{r}
+DimPlot(obj.integrated,reduction="umap",label=T,group.by="cluster_label")
+DimPlot(obj.integrated,reduction="umap")
+
+#save(obj.integrated, file="../int_data/integrated_HuMa.rda")
+```
+
+
+# Compare clustering
+```{r}
+load("../int_data/integrated_HuMa.rda")
+
+sample.combined <- obj.integrated
+
+sample.combined$integrated_clusters <- sample.combined$seurat_clusters
+
+sample.combined$label_for_heatmap <- sample.combined$cluster_label
+#sample.combined$label_for_heatmap[sample.combined$species_label == "Macaque"] <- paste0(sample.combined$cluster_label,"ac") 
+
+
+```
+## functions
+```{r}
+
+reorder_matrix <- function(matrix1, by.rows = TRUE) {
+  if (by.rows == TRUE) {
+    conf.order <- order(apply(matrix1, 1, which.max))
+    matrix1.reordered <- matrix1[conf.order, ]
+  } else {
+    conf.order <- order(apply(matrix1, 2, which.max))
+    matrix1.reordered <- matrix1[, conf.order]
+  }
+}
+
+
+
+compare_cl <- function(cl, ref.cl,
+                       plot.title = NA, 
+                       plot.silent = TRUE,
+                       heat.colors = colorRampPalette(c("white", 
+                                                        "grey70",
+                                                        "black"))(100),
+                       cluster_rows=NULL,
+                       row.cl.num = min(length(unique(cl)),
+                                        length(unique(ref.cl)))) {
+  library(grid)
+  library(pheatmap)
+  
+  conf1 <- table(cl, ref.cl)
+  conf1 <- sweep(conf1, 1, rowSums(conf1), "/")
+  conf2 <- reorder_matrix(conf1)
+  
+  # Cluster co-occurence
+  cl.prop.cocl <- apply(conf1, 2, function(x) {
+    grid1 <- expand.grid(x, x)
+    min.prop <- apply(grid1, 1, min)
+  })
+  
+  cl.prop.cocl.total <- apply(cl.prop.cocl, 1, sum)
+  cl.prop.cocl.m <- matrix(cl.prop.cocl.total, nrow(conf1), nrow(conf1),
+                           dimnames = list(rownames(conf1), rownames(conf1)))
+  
+  ph1 <- pheatmap(conf2, 
+                  cutree_rows = row.cl.num, 
+                  clustering_method = "ward.D2", 
+                  #cluster_rows = cluster_rows,
+                  #annotation_row = ref.cl.anno[, -grep("cluster_label", colnames(ref.cl.anno))],
+                  color = heat.colors, 
+                  fontsize = 6,
+                  main = plot.title, 
+                  silent = plot.silent)
+  
+  return(list(conf = conf2, cocl = cl.prop.cocl.m, ph = ph1))
+}
+```
+
+
+```{r}
+heat.colors <- colorRampPalette(c("white", "grey70", "black"))(100)
+heat.colors <- colorRampPalette(c("white","midnightblue"))(200)
+```
+
+```{r}
+ref.cl <- sample.combined$label_for_heatmap
+cca.cl <- sample.combined$integrated_clusters
+
+compare.species <- c("_M","_H")
+
+#cl.conf <- compare_cl(ref.cl, cca.cl, cluster_rows = all_hc[["hclust"]])
+cl.conf <- compare_cl(cl=ref.cl, ref.cl=cca.cl)
+cocl <- cl.conf$cocl
+
+grid.draw(cl.conf[["ph"]]$gtable)
+```
+
+```{r}
+cocl.subset <- cocl[grepl(compare.species[1], row.names(cocl)),
+                    grepl(compare.species[2], row.names(cocl))] 
+
+row.names(cocl.subset) <- sub(paste0(compare.species[1], "_"), "",
+                              row.names(cocl.subset))
+
+colnames(cocl.subset) <- sub(paste0(compare.species[2], "_"), "", 
+                             colnames(cocl.subset))
+
+cocl.subset2 <- reorder_matrix(cocl.subset, by.rows = FALSE)
+
+
+library(fpc)
+clus.method <- "single"
+
+clus.num <- pamk(cocl, 1:(min(nrow(cocl), ncol(cocl)) - 1))$nc
+
+ph1 <- pheatmap(cocl, clustering_method = clus.method,
+                cutree_cols = clus.num, cutree_rows = clus.num,
+                color = heat.colors,
+                fontsize = 6)
+
+ph <- pheatmap(cocl.subset2, cluster_rows = FALSE, cluster_cols = FALSE,
+         color = heat.colors,
+         fontsize = 10) 
+
+
+```
+
+
+
+```{r}
+ggsave(file="../analysis_output/HuMa_cluster_cor_neuron_grid.pdf",ph, height=5,width=5)
+
+```

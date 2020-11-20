@@ -1,0 +1,327 @@
+---
+title: "Mouse Anno"
+author: "Cy"
+date: "09/09/2020"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+```{r include=FALSE}
+library(dplyr)
+library(Seurat)
+library(ggplot2)
+library(cowplot)
+library(scrattch.hicat)
+library(feather)
+require(Matrix)
+require(scrattch.vis)
+library(SeuratWrappers)
+source("../R_scripts/hicat_modules.r")
+
+load("../int_data/collected_data_20200818.rda")
+load("../int_data/Clustering_Mouse.rda")
+```
+
+```{r}
+spec="mouse"
+
+keepgen=grep("^LOC|^mt-|^Rpl|^Rps",rownames(datlist[[spec]]),val=T,invert=T)
+
+```
+
+```{r}
+allcl=data.frame(sample_name=colnames(m.int@assays$RNA),cluster_id=1,cluster_label=0,cluster_color="black",stringsAsFactors = F)
+rownames(allcl)=allcl$sample_name
+
+#m.int3 - cl3 == LP
+#m.int3 - cl3 == Noise
+#m.int3 - cl5 == LGv
+#m.int4 - cl0 == LGN
+#m.int5 - cl0 == LP
+#m.int5 - cl1 == LGv
+#m.int6 - cl0 == Chrna1
+#m.int6 - cl1 == Chrna2
+#m.int6 - cl2 == GABA1
+#m.int6 - cl3 == GABA2
+#m.int6 - cl4 == GABA3
+#m.int6 - cl5 == Chrna5
+#m.int6 - cl6 == GABA4
+#m.int6 - cl7 == GABA5
+#m.int6 - cl8 == GABA6
+#m.int7 - cl0 == Oligo1
+#m.int7 - cl1 == Oligo2
+#m.int7 - cl2 == Oligo3
+
+
+allcl[names(m.int3@active.ident)[m.int3@active.ident ==3],"cluster_label"] <- "LP"
+allcl[names(m.int3@active.ident)[m.int3@active.ident ==4],"cluster_label"] <- "Low Quality"
+allcl[names(m.int3@active.ident)[m.int3@active.ident ==5],"cluster_label"] <- "LGv"
+
+allcl[names(m.int4@active.ident)[m.int4@active.ident ==0],"cluster_label"] <- "LGd"
+
+allcl[names(m.int6@active.ident)[m.int6@active.ident ==0],"cluster_label"] <- "Chrna1"
+allcl[names(m.int6@active.ident)[m.int6@active.ident ==1],"cluster_label"] <- "Chrna2"
+allcl[names(m.int6@active.ident)[m.int6@active.ident ==2],"cluster_label"] <- "GABA1"
+allcl[names(m.int6@active.ident)[m.int6@active.ident ==3],"cluster_label"] <- "GABA2"
+allcl[names(m.int6@active.ident)[m.int6@active.ident ==4],"cluster_label"] <- "GABA3"
+allcl[names(m.int6@active.ident)[m.int6@active.ident ==5],"cluster_label"] <- "Chrna3"
+allcl[names(m.int6@active.ident)[m.int6@active.ident ==6],"cluster_label"] <- "GABA4"
+allcl[names(m.int6@active.ident)[m.int6@active.ident ==7],"cluster_label"] <- "GABA5"
+allcl[names(m.int6@active.ident)[m.int6@active.ident ==8],"cluster_label"] <- "GABA6"
+
+allcl[names(m.int7@active.ident)[m.int7@active.ident ==0],"cluster_label"] <- "Oligo1"
+allcl[names(m.int7@active.ident)[m.int7@active.ident ==1],"cluster_label"] <- "Oligo2"
+allcl[names(m.int7@active.ident)[m.int7@active.ident ==2],"cluster_label"] <- "Oligo3"
+
+
+# Add donor and roi info  
+allcl$donor=metalist[[spec]]$external_donor_name[match(allcl$sample_name,rownames(metalist[[spec]]))]
+
+allcl$roi=metalist[[spec]]$roi[match(allcl$sample_name,rownames(metalist[[spec]]))]
+
+allcl$gender=metalist[[spec]]$gender[match(allcl$sample_name,rownames(metalist[[spec]]))]
+
+
+#save(allcl,file="../int_data/mouse_allcl.rda")
+
+cl.df <- allcl %>% group_by(cluster_id, cluster_label) %>% summarise(n=n())
+
+#write.csv(cl.df, file="../int_data/mouse.cl.df.csv")
+
+```
+
+
+```{r}
+
+cl.df <- read.csv("../int_data/mouse.cl.df.csv")
+load("../int_data/mouse_allcl.rda")
+
+allcl <- allcl[,c(1,3,5:9)]
+allcl <- left_join(allcl,cl.df)
+
+roi_palette <- read.csv("../data/roi_palette.csv")
+allcl <- left_join(allcl, select(roi_palette, roi, roi_color,dissection_roi), by=c("roi"="roi"))
+
+
+rownames(allcl) <- allcl$sample_name
+
+save(allcl,file="../int_data/mouse_allcl.rda")
+
+```
+
+
+
+### UMAP plots - plot_objects
+```{r}
+allcl <- allcl[allcl$cluster_label != "Low Quality",]
+
+plot_objects=list()
+subcells=list()
+subcells[["all"]] <- allcl$sample_name
+subcells[["neuron"]] <- subset(allcl$sample_name, allcl$class_label != "Non-Neuronal" )
+subcells[["lgd"]] <- subset(allcl$sample_name, allcl$cluster_label == "LGd" )
+subdat=datlist[[spec]][,allcl$sample_name]
+  subdat=sweep(subdat,2,Matrix::colSums(subdat),"/")*10^6
+  for (nam in names(subcells)) {
+    keepcells=subcells[[nam]]
+    m.overall <- CreateSeuratObject(counts = subdat[,keepcells], meta.data = allcl[keepcells,])
+    m.overall <- NormalizeData(object =m.overall)
+    m.overall <- ScaleData(object =m.overall, verbose = FALSE)
+    m.overall <- FindVariableFeatures(object =m.overall, selection.method = "vst", top.genes = 2000)
+    m.overall <- RunPCA(object =m.overall, npcs = 30, verbose = FALSE)
+    m.overall <- RunTSNE(object =m.overall, reduction = "pca", dims = 1:15)
+    m.overall <- RunUMAP(object =m.overall, reduction = "pca", dims = 1:15)
+    plot_objects[[nam]]=m.overall
+    print(nam)
+  }
+
+#save(plot_objects,file="../int_data/mouse_plotobjects.rda")
+
+```
+
+```{r}
+
+DimPlot(plot_objects[["all"]], group.by = "donor")
+DimPlot(plot_objects[["all"]], group.by = "cluster_label")
+DimPlot(plot_objects[["all"]], group.by = "roi")
+
+DimPlot(plot_objects[["neuron"]], group.by = "donor")
+DimPlot(plot_objects[["neuron"]], group.by = "cluster_label")
+DimPlot(plot_objects[["neuron"]], group.by = "roi")
+
+DimPlot(plot_objects[["lgd"]], group.by = "donor")
+DimPlot(plot_objects[["lgd"]], group.by = "cluster_label")
+DimPlot(plot_objects[["lgd"]], group.by = "roi")
+
+```
+
+
+```{r}
+hclust_semisupervised <- function(data, groups, dist_method = "euclidean",dist_p = 10, hclust_method = "ward.D2") {
+    hclist <- lapply(groups, function (group) {
+        hclust(dist(data[group,], method = dist_method, p = dist_p), method = hclust_method)
+    })
+    hc <- .merge_hclust(hclist)
+    data_reordered <- data[unlist(groups),]
+
+    return(list(data = data_reordered, hclust = hc))
+}
+
+.merge_hclust <- function(hclist) {
+    #-- Merge
+    d <- as.dendrogram(hclist[[1]])
+    for (i in 2:length(hclist)) {
+        d <- merge(d, as.dendrogram(hclist[[i]]))
+    }
+    as.hclust(d)
+}
+```
+
+
+```{r}
+#pdf("../analysis_output/mouse_dendrograms.pdf")
+
+temp=plot_objects[["all"]]
+  meanvals=matrix(0,ncol=30,nrow=length(unique(allcl$cluster_label)))
+  rownames(meanvals)=unique(allcl$cluster_label)[order(unique(allcl$cluster_id))]
+  for (ii in rownames(meanvals)) {
+    for (jj in 1:ncol(meanvals)) {
+      meanvals[ii,jj]=mean(temp@reductions$pca@cell.embeddings[allcl$sample_name[allcl$cluster_label==ii],jj])
+    }
+  }
+  
+GA <- cl.df$cluster_label[cl.df$class_label == "GABA"]
+GL <- cl.df$cluster_label[cl.df$class_label == "Glut"]
+NN <- cl.df$cluster_label[cl.df$class_label == "Non-Neuronal"]
+
+GA <- as.character(GA)
+GL <- as.character(GL)
+NN <- as.character(NN)
+
+
+all_hc <- hclust_semisupervised(meanvals, list(GA, GL, NN))
+                                 
+dend=as.dendrogram(all_hc$hclust)
+
+plot(dend)
+
+
+N_hc <- hclust_semisupervised(meanvals, list(GA, GL))
+dend.N=as.dendrogram(N_hc$hclust)
+plot(dend.N)
+
+#dev.off()
+
+```
+
+
+
+
+```{r}
+
+cl.df <- read.csv("../int_data/mouse.cl.df.csv")
+load("../int_data/mouse_allcl.rda")
+
+allcl$cluster_label <- cl.df$cluster_label[match(allcl$org_cl.lab, cl.df$org_cl.lab)]
+allcl$cluster_id <- cl.df$cluster_id[match(allcl$org_cl.lab, cl.df$org_cl.lab)]
+allcl$cluster_color <- cl.df$cluster_color[match(allcl$org_cl.lab, cl.df$org_cl.lab)]
+
+
+rownames(allcl) <- allcl$sample_name
+
+save(allcl,file="../int_data/mouse_allcl.rda")
+
+
+test <- allcl %>% group_by(cluster_id, cluster_label) %>% summarise(n=n())
+
+```
+
+
+
+### UMAP plots - plot_objects
+```{r}
+allcl <- allcl[allcl$cluster_label != "Low Quality",]
+
+plot_objects=list()
+subcells=list()
+subcells[["all"]] <- allcl$sample_name
+subcells[["neuron"]] <- subset(allcl$sample_name, allcl$class_label != "Non-Neuronal" )
+subcells[["lgd"]] <- subset(allcl$sample_name, allcl$cluster_label == "LGd" )
+subdat=datlist[[spec]][,allcl$sample_name]
+  subdat=sweep(subdat,2,Matrix::colSums(subdat),"/")*10^6
+  for (nam in names(subcells)) {
+    keepcells=subcells[[nam]]
+    m.overall <- CreateSeuratObject(counts = subdat[,keepcells], meta.data = allcl[keepcells,])
+    m.overall <- NormalizeData(object =m.overall)
+    m.overall <- ScaleData(object =m.overall, verbose = FALSE)
+    m.overall <- FindVariableFeatures(object =m.overall, selection.method = "vst", top.genes = 2000)
+    m.overall <- RunPCA(object =m.overall, npcs = 30, verbose = FALSE)
+    m.overall <- RunTSNE(object =m.overall, reduction = "pca", dims = 1:15)
+    m.overall <- RunUMAP(object =m.overall, reduction = "pca", dims = 1:15)
+    plot_objects[[nam]]=m.overall
+    print(nam)
+  }
+
+#save(plot_objects,file="../int_data/mouse_plotobjects.rda")
+
+```
+
+```{r}
+
+DimPlot(plot_objects[["all"]], group.by = "donor")
+DimPlot(plot_objects[["all"]], group.by = "cluster_label")
+DimPlot(plot_objects[["all"]], group.by = "roi")
+
+DimPlot(plot_objects[["neuron"]], group.by = "donor")
+DimPlot(plot_objects[["neuron"]], group.by = "cluster_label")
+DimPlot(plot_objects[["neuron"]], group.by = "roi")
+
+DimPlot(plot_objects[["lgd"]], group.by = "donor")
+DimPlot(plot_objects[["lgd"]], group.by = "cluster_label")
+DimPlot(plot_objects[["lgd"]], group.by = "roi")
+
+```
+
+
+
+```{r}
+pdf("../analysis_output/mouse_dendrograms.pdf")
+
+temp=plot_objects[["all"]]
+  meanvals=matrix(0,ncol=30,nrow=length(unique(allcl$cluster_label)))
+  rownames(meanvals)=unique(allcl$cluster_label)[order(unique(allcl$cluster_id))]
+  for (ii in rownames(meanvals)) {
+    for (jj in 1:ncol(meanvals)) {
+      meanvals[ii,jj]=mean(temp@reductions$pca@cell.embeddings[allcl$sample_name[allcl$cluster_label==ii],jj])
+    }
+  }
+  
+GA <- cl.df$cluster_label[cl.df$class_label == "GABA"]
+GL <- cl.df$cluster_label[cl.df$class_label == "Glut"]
+NN <- cl.df$cluster_label[cl.df$class_label == "Non-Neuronal"]
+
+GA <- as.character(GA)
+GL <- as.character(GL)
+NN <- as.character(NN)
+
+
+all_hc <- hclust_semisupervised(meanvals, list(GA, GL, NN))
+                                 
+dend=as.dendrogram(all_hc$hclust)
+
+plot(dend)
+
+
+N_hc <- hclust_semisupervised(meanvals, list(GA, GL))
+dend.N=as.dendrogram(N_hc$hclust)
+plot(dend.N)
+
+dev.off()
+
+```
+
+
+
+

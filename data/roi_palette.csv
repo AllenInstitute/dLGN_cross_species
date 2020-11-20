@@ -1,0 +1,14 @@
+species,roi,org_roi_color,roi_color,n_roi,dissection_roi,roi_ap_color
+Human,KC-a,#00CC14,#1E633B,72,KC,#309f69
+Human,KC-p,#00CC14,#1E633B,79,KC,#1E633B
+Macaque,Macaque LGN Magnocellular,#1034A6,#123466,795,MC,
+Macaque,Macaque LGN Parvocellular,#FF0000,#FF7F00,720,PC,
+Macaque,Macaque Pulvinar - Inferior,#BEBEBE,#BEBEBE,488,Pulv,
+Human,MC-a,#1034A6,#123466,218,MC,#2467ca
+Human,MC-p,#1034A6,#123466,168,MC,#123466
+Mouse,Mouse LGN - Core,#580077,#580077,1132,dLGN - Core,
+Mouse,Mouse LGN - Shell,#D066E0,#D066E0,503,dLGN - Shell,
+Mouse,Mouse LGv,#8FBE3F,#8FBE3F,88,LGv,
+Mouse,Mouse LP,#1C75BC,#7285A5,178,LP,
+Human,PC-a,#FF0000,#FF7F00,216,PC,#ffb062
+Human,PC-p,#FF0000,#FF7F00,209,PC,#FF7F00

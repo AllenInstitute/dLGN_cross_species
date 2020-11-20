@@ -1,0 +1,1242 @@
+---
+title: 'Integration: Human - Macaque - Mouse'
+author: "Cy"
+date: "9/16/2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r}
+library(dplyr)
+library(Seurat)
+library(ggplot2)
+library(cowplot)
+library(scrattch.hicat)
+library(scrattch.vis)
+library(feather)
+require(Matrix)
+library(scales)
+```
+
+```{r}
+load("../int_data/collected_data_20200818.rda")
+
+load("../int_data/macaque_allcl.rda")
+allcl_mac=allcl
+allcl_mac$cluster_label=paste0(allcl_mac$cluster_label,"_M")
+load("../int_data/human_allcl.rda")
+allcl_hum=allcl
+allcl_hum$cluster_label=paste0(allcl_hum$cluster_label,"_H")
+allcl_hum$dissection_roi <- allcl_hum$roi
+load("../int_data/mouse_allcl.rda")
+allcl_mus=allcl
+allcl_mus$cluster_label=paste0(allcl_mus$cluster_label,"_Mo")
+
+```
+
+
+```{r}
+spec="macaque"
+orthos=read.csv("../data/ortholog_table_20191122.csv",as.is=T)
+nonlocgenes=orthos$rhesus_symbol[intersect(grep("^LOC",orthos$human_symbol,invert=T),grep("^LOC",orthos$rhesus_symbol))]
+keepgen=setdiff(rownames(datlist[[spec]]),setdiff(grep("^LOC|^MT-|^RPL|^RPS|^SNAR|^CT45|^MIR|^MTND|^TRNA",rownames(datlist[[spec]]),val=T),nonlocgenes))
+datlist[[spec]]=datlist[[spec]][keepgen,]
+datlist[[spec]]@x=datlist[[spec]]@x/rep.int(Matrix::colSums(datlist[[spec]]),diff(datlist[[spec]]@p))*10^6
+spec="human"
+keepgen=grep("^LOC|^MT-|^RPL|^RPS|^SNAR|^CT45|^MIR|^MTND|[0-9]P$|-AS|-PS|DUX4L",rownames(datlist[[spec]]),val=T,invert=T)
+keepdons=which(metalist$human$external_donor_name_label %in% c("H200.1023","H200.1025","H200.1030"))
+datlist[[spec]]=datlist[[spec]][keepgen,keepdons]
+datlist[[spec]]@x=datlist[[spec]]@x/rep.int(Matrix::colSums(datlist[[spec]]),diff(datlist[[spec]]@p))*10^6
+spec="mouse"
+keepgen=grep("^LOC|^mt-|^Rpl|^Rps",rownames(datlist[[spec]]),val=T,invert=T)
+
+```
+
+
+####integrate populations
+```{r, select mac samples}
+rownames(allcl_mac) <- allcl_mac$sample_name
+
+#mac_cls <- c("K1_M","K2_M","M_M","P_M")
+class <- c("GABA","Glut")
+
+keepcells_mac1=allcl_mac$sample_name[allcl_mac$donor=="Q17.27.002" & allcl_mac$class_label %in% class]
+  
+keepcells_mac2=allcl_mac$sample_name[allcl_mac$donor=="Q18.27.001" & allcl_mac$class_label %in% class]
+
+keepcells_mac3=allcl_mac$sample_name[allcl_mac$donor=="Q18.27.003" & allcl_mac$class_label %in% class]
+
+
+
+
+```
+
+```{r,select hum samples}
+
+#hum_cls <- c("K1_H","K2_H","MP_H")
+keepcells_hum<- allcl_hum$sample_name[allcl_hum$class_label %in% class]
+#keepcells_hum1 <- allcl_hum$sample_name[allcl_hum$donor=="H200.1023" & allcl_hum$class_label %in% class]
+#keepcells_hum2 <- allcl_hum$sample_name[allcl_hum$donor=="H200.1025" & allcl_hum$class_label %in% class]
+#keepcells_hum3 <- allcl_hum$sample_name[allcl_hum$donor=="H200.1030" & allcl_hum$class_label %in% class]
+
+```
+```{r,select mus samples}
+keepcells_mus=allcl_mus$sample_name[allcl_mus$class_label %in% class]
+
+```
+
+```{r}
+
+datlist2=datlist
+for (ii in 1:length(datlist2)) {
+  rownames(datlist2[[ii]])=tolower(rownames(datlist2[[ii]]))
+}
+obj.list = list()
+
+obj.list[["macaque1"]]=CreateSeuratObject(round(datlist2[["macaque"]][,keepcells_mac1]),meta.data=allcl_mac[keepcells_mac1,])
+obj.list[["macaque2"]]=CreateSeuratObject(round(datlist2[["macaque"]][,keepcells_mac2]),meta.data=allcl_mac[keepcells_mac2,])
+obj.list[["macaque3"]]=CreateSeuratObject(round(datlist2[["macaque"]][,keepcells_mac3]),meta.data=allcl_mac[keepcells_mac3,])
+
+obj.list[["human"]]=CreateSeuratObject(round(datlist2[["human"]][,keepcells_hum]),meta.data=allcl_hum[keepcells_hum,])
+
+#obj.list[["human1"]]=CreateSeuratObject(round(datlist2[["human"]][,keepcells_hum1]),meta.data=allcl_hum[keepcells_hum1,])
+#obj.list[["human2"]]=CreateSeuratObject(round(datlist2[["human"]][,keepcells_hum2]),meta.data=allcl_hum[keepcells_hum2,])
+#obj.list[["human3"]]=CreateSeuratObject(round(datlist2[["human"]][,keepcells_hum3]),meta.data=allcl_hum[keepcells_hum3,])
+
+obj.list[["mouse"]]=CreateSeuratObject(round(datlist2[["mouse"]][,keepcells_mus]),meta.data=allcl_mus[keepcells_mus,])
+```
+```{r}
+
+for (ii in 1:length(obj.list)) {
+  obj.list[[ii]] <- SCTransform(obj.list[[ii]], verbose = FALSE)
+}
+obj.anchors <- FindIntegrationAnchors(object.list = obj.list, dims = 1:30)
+obj.integrated <- IntegrateData(anchorset = obj.anchors, dims = 1:30)
+
+
+DefaultAssay(obj.integrated) <- "integrated"
+obj.integrated <- ScaleData(obj.integrated, verbose = FALSE)
+obj.integrated <- RunPCA(obj.integrated, npcs = 30, verbose = TRUE)
+uniqcl=unique(obj.integrated@meta.data$cluster_label)
+uniqcl=uniqcl[order(uniqcl)]
+colvec=obj.integrated@meta.data$cluster_color[match(uniqcl,obj.integrated@meta.data$cluster_label)]
+```
+
+```{r}
+
+dimval <- 5
+obj.integrated <- RunUMAP(obj.integrated, reduction = "pca", dims = 1:dimval)
+
+obj.integrated <- FindNeighbors(object = obj.integrated, k.param = 8)
+obj.integrated <- FindClusters(object = obj.integrated, resolution = 0.4) #0.4
+DimPlot(obj.integrated, reduction = "umap")
+
+#save(obj.integrated, file= "../int_data/HMM_integrated.rda")
+
+```
+
+
+```{r, eval=FALSE}
+for (dimval in 3:15) {
+  temp=RunUMAP(temp,reduction="pca",dims=1:dimval, verbose=FALSE)
+  plot <- DimPlot(temp, reduction = "umap", group.by = "dissection_roi",label=T)
+  plot <- plot+ggtitle(dimval)
+  print(plot)
+   }
+```
+
+##### umap plots original vals ####
+```{r}
+umap_int_all <- obj.integrated@reductions$umap@cell.embeddings
+seurat.meta<-obj.integrated@meta.data
+seurat.meta$cluster.id_all <- paste0(seurat.meta$species,"_", seurat.meta$cluster_id)
+seurat.meta$cluster.label_all <- paste0(seurat.meta$species,"_", seurat.meta$cluster_label)
+
+clcols <- unique(seurat.meta[,c("cluster.id_all", "cluster.label_all", "cluster_color")])
+clcol <- setNames(clcols$cluster_color, clcols$cluster.label_all)
+```
+
+
+
+```{r}
+## colored by original cluster
+
+colnames(umap_int_all) = c("Lim1","Lim2")
+g1= plot_RD_meta(umap_int_all, factor(seurat.meta[row.names(umap_int_all),] %>% pull(cluster.label_all),levels=names(clcol)), meta.col=clcol,alpha=0.5, cex=1)
+g1 = g1+	ggtitle("cluster") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+g1[["data"]]$species <- seurat.meta$species_label
+g2 <- g1 + facet_wrap(~species, ncol=1)
+
+
+## colored by species
+species.cols <- setNames(c("#939598","#000000","#FF73D0"), c("Macaque","Human","Mouse"))
+g3 <- plot_RD_meta(umap_int_all, factor(seurat.meta[row.names(umap_int_all),] %>% pull(species_label),levels=names(species.cols)), meta.col=species.cols,alpha=0.5, cex=1)
+g3 <- g3+	ggtitle("Species") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+g4 <- g3 + facet_wrap(~meta, ncol=1)
+
+# colored by dissection roi
+#roi_palette <- read.csv("roi_palette.csv",stringsAsFactors = FALSE)
+
+rcol <- unique(seurat.meta[,c("dissection_roi", "roi_color")])
+rcol <- setNames(rcol$roi_color, rcol$dissection_roi)
+
+g5 <- plot_RD_meta(umap_int_all, factor(seurat.meta[row.names(umap_int_all),] %>% pull(dissection_roi),levels=names(rcol)), meta.col=rcol,alpha=0.5, cex=1)
+g5 <- g5 +	ggtitle("Species") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+g5[["data"]]$species <- seurat.meta$species_label
+g6 <- g5 + facet_wrap(~species, ncol=1)
+
+
+
+g1
+g2
+g3
+g4
+g5
+g6
+
+
+```
+
+```{r}
+ggsave(file="../analysis_output/HMM_species_all_umap.pdf",gridExtra::marrangeGrob(list(g1,g3,g5),nrow = 1, ncol=1), height=5,width=4)
+ggsave(file="../analysis_output/species_all_umap.split.pdf",gridExtra::marrangeGrob(list(g2,g4,g6),nrow = 1, ncol=1), height=15,width=4)
+```
+
+###### Fig 5C/D ######
+## umap glut
+```{r}
+#load("../int_data/HMM_integrated.rda")
+
+umap_int_all <- as.data.frame(obj.integrated@reductions$umap@cell.embeddings)
+colnames(umap_int_all) = c("Lim1","Lim2")
+
+seurat.meta<-obj.integrated@meta.data
+meta <- seurat.meta[seurat.meta$class_label == "Glut",]
+
+umap <- umap_int_all[c(umap_int_all$Lim2 > -6 & umap_int_all$Lim1 <7),] 
+
+g7 <- plot_RD_meta(umap, factor(meta[row.names(umap),] %>% pull(dissection_roi),levels=names(rcol)), meta.col=rcol,alpha=0.5, cex=1)
+g7 <- g7 +  ggtitle("Species") +
+    theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+    theme_void() + 
+    theme(legend.position="none") 
+
+g7
+
+
+
+
+umap <- tibble::rownames_to_column(umap, var="sample_name")
+umap <- umap %>% left_join(meta)
+
+rcol <- unique(umap[,c("dissection_roi", "roi_color")])
+rcol <- setNames(rcol$roi_color, rcol$dissection_roi)
+
+library(ggridges)
+x_axis <- ggplot(umap, aes(x = Lim1, y = dissection_roi, fill=roi_color)) +   
+      geom_density_ridges(scale=10, aes(alpha=0.5), rel_min_height=0.01) + 
+      scale_fill_identity() +
+      #theme_ridges(grid = FALSE, center_axis_labels = TRUE) +
+      theme_void() +
+      theme(legend.position="none") 
+
+y_axis <- ggplot(umap, aes(x = Lim2, y = dissection_roi, fill=roi_color)) +   
+      geom_density_ridges(scale=10, aes(alpha=0.5), rel_min_height=0.01) + 
+      scale_fill_identity() +
+      #theme_ridges(grid = FALSE, center_axis_labels = FALSE) +
+      theme_void() +
+      theme(legend.position="none") 
+
+x_axis
+y_axis
+
+```
+
+```{r}
+ggsave(file="../analysis_output/HMM_species_GL_roi_umap.pdf",g7, height=5,width=5, useDingbats=FALSE)
+
+ggsave(file="../analysis_output/HMM_umap_ridges_5c.pdf",gridExtra::marrangeGrob(list(x_axis, y_axis),nrow = 1, ncol=1), height=2,width=5)
+```
+
+
+
+
+
+
+
+
+###############
+## identify genes correlated with umap-axes per species
+###############
+```{r}
+load("../int_data/HMM_integrated.rda")
+
+seurat.meta<-obj.integrated@meta.data
+meta <- seurat.meta[seurat.meta$class_label == "Glut",]
+
+org.coords=obj.integrated@reductions$umap@cell.embeddings[,1:2]
+org.coords <- org.coords[meta$sample_name,]
+plot(org.coords)
+
+## rotate plot by 45 degrees.
+coords <- spdep::Rotation(org.coords, -45)
+plot(coords)
+coords <- coords[coords[,1] <10 & coords[,2] > -6,]
+plot(coords)
+
+meta <- meta[meta$sample_name %in% rownames(coords),]
+
+keepcells_mac=meta$sample_name[which(meta$species_label =="Macaque")]
+keepcells_hum=meta$sample_name[which(meta$species_label =="Human")]
+keepcells_mus=meta$sample_name[which(meta$species_label =="Mouse")]
+
+require(Matrix)
+axis_genelists=list()
+
+### Macaque axis 1
+mac_cells_axis1=coords[keepcells_mac,1]
+genvals=t(cor(mac_cells_axis1,as.matrix(t(obj.integrated@assays[["integrated"]]@data[,keepcells_mac])),method="spearman"))
+axis.genes <- as.data.frame(genvals)
+colnames(axis.genes) <- "Mac.axis1"
+axis_genelists[["macaque_axis1"]]=genvals
+
+### Human axis 1
+hum_cells_axis1=coords[keepcells_hum,1]
+genvals=t(cor(hum_cells_axis1,as.matrix(t(obj.integrated@assays[["integrated"]]@data[,keepcells_hum])),method="spearman"))
+axis.genes$"Hu.axis1" <- genvals
+axis_genelists[["human_axis1"]]=genvals
+
+### Mouse axis 1
+mus_cells_axis1=coords[keepcells_mus,1]
+genvals=t(cor(mus_cells_axis1,as.matrix(t(obj.integrated@assays[["integrated"]]@data[,keepcells_mus])),method="spearman"))
+axis.genes$"Mo.axis1" <- genvals
+axis_genelists[["mouse_axis1"]]=genvals
+
+
+### Macaque axis 2
+mac_cells_axis2=coords[keepcells_mac,2]
+genvals=t(cor(mac_cells_axis2,as.matrix(t(obj.integrated@assays[["integrated"]]@data[,keepcells_mac])),method="spearman"))
+axis.genes$"Mac.axis2" <- genvals
+axis_genelists[["macaque_axis2"]]=genvals
+
+### Human axis 2
+hum_cells_axis2=coords[keepcells_hum,2]
+genvals=t(cor(hum_cells_axis2,as.matrix(t(obj.integrated@assays[["integrated"]]@data[,keepcells_hum])),method="spearman"))
+axis.genes$"Hu.axis2" <- genvals
+axis_genelists[["human_axis2"]]=genvals
+
+### Mouse axis 2
+mus_cells_axis2=coords[keepcells_mus,2]
+genvals=t(cor(mus_cells_axis2,as.matrix(t(obj.integrated@assays[["integrated"]]@data[,keepcells_mus])),method="spearman"))
+axis.genes$"Mo.axis2" <- genvals
+axis_genelists[["mouse_axis2"]]=genvals
+```
+
+```{r,fig.height=8, fig.width=6}
+
+keepgenesplot <- axis.genes %>%
+        tibble::rownames_to_column('gene') %>%
+        filter_if(is.numeric, any_vars(. > 0.25 | .< -0.25))
+
+#keepgenesplot$gene <-factor(keepgenesplot$gene, levels=unique(keepgenesplot$gene[order(keepgenesplot$Mac.axis1)]), ordered=TRUE)
+
+library(reshape)
+genesplot <- melt(keepgenesplot)
+genesplot$variable <- factor(genesplot$variable, levels=c("Mac.axis1","Hu.axis1","Mo.axis1", "Mac.axis2",  "Hu.axis2", "Mo.axis2"))
+
+
+p.gene.cor <- ggplot(genesplot) + 
+      geom_tile(aes(y=reorder(gene, value,median, order=TRUE), x=variable, fill =value)) +
+      #scale_fill_gradient2(low = "midnightblue", mid = "white", high ="red", oob="squish")
+      scale_fill_gradient(low = "#132B43", high ="#56B1F7") #"#8accff"
+
+x <- ggplot_build(p.gene.cor)
+gene.order.plot <- x[["layout"]][["panel_params"]][[1]][["y.sec"]][["limits"]]
+
+genes.to.plot <- head(gene.order.plot, 30) 
+genes.to.plot2 <- tail(gene.order.plot, 30)
+extra <- c("foxp2","robo2", "camk2a","necab1")
+genes.to.plot <- append(genes.to.plot,append(extra ,genes.to.plot2))
+genes.to.plot <- unique(genes.to.plot)
+genesplot.s <- genesplot[genesplot$gene %in% genes.to.plot,]
+
+p.gene.cor <- ggplot(genesplot.s) + 
+      geom_tile(aes(y=reorder(gene, value,median, order=TRUE), x=variable, fill =value)) +
+      scale_fill_gradient(low = "#132B43", high ="#56B1F7") #"#8accff"
+
+p.gene.cor
+```
+```{r}
+
+ggsave(file= "../analysis_output/HMM_integrated_GL_heatmap_corr.axis.pdf", p.gene.cor, width=5, height=8, useDingbats=FALSE)
+```
+
+
+```{r, fig.height=12, fig.width=6}
+keepgenesplot <- axis.genes %>%
+        tibble::rownames_to_column('gene') %>%
+        filter_if(is.numeric, any_vars(. > 0.25 | .< -0.25))
+
+axis.g <- colnames(keepgenesplot)
+axis.g <- axis.g[-1]
+
+
+lst <- list()
+n=10
+
+for(i in axis.g ) {
+  nm <- paste0(i,"_1")
+  lst[[nm]] <- keepgenesplot$gene[head(order(keepgenesplot[i]),n)]
+  nm <- paste0(i,"_2")
+  lst[[nm]] <- keepgenesplot$gene[tail(order(keepgenesplot[i]),n)]
+}
+
+keepgenes <- unlist(lst)
+keepgenes <- c(keepgenes,"foxp2","necab1")
+keepgenes <- unique(keepgenes)
+
+keepgenes <- keepgenesplot[keepgenesplot$gene %in% keepgenes,]
+rownames(keepgenes) <- keepgenes$gene
+keepgenes <- keepgenes[,-1]
+keepgenes <- as.matrix(keepgenes)
+
+#------------prepare row and column dendrograms---------------------------------
+
+# set the custom distance and clustering functions, per your example
+hclustfunc <- function(x) hclust(x, method="complete")#"ward.D", "ward.D2", "single", "complete", "average"
+distfunc <- function(x) dist(x, method="maximum")#"euclidean", "maximum", "manhattan", "canberra", "binary" or "minkowski"
+
+
+#------------Color Palettes----------------------------------------------------
+heat.col = colorRampPalette(rev(c("midnightblue","dodgerblue3","white","goldenrod1","darkorange2")), space="Lab")
+heat.col <- colorRampPalette(c("#440154FF" ,"#414487FF" ,"#2A788EFF", "#7AD151FF" ,"#FDE725FF"), space="Lab")
+heat.col <- colorRampPalette(rev(c("#ffffd9","#c7e9b4","#41b6c4","#1d91c0","#225ea8","#081d58")))
+heat.col <- colorRampPalette(c("firebrick1", "white", "dodgerblue4"))
+heat.col<-colorRampPalette(c("#132B43","#56B1F7"))
+
+
+#------------Plot heatmap----------------------------------------------------
+pdf("../analysis_output/HMM_integrated_GL_heatmap_corr.axis_hm_col8.pdf",width=9,height=12)
+gplots::heatmap.2(as.matrix(keepgenes), 
+          trace= "none",
+          density="none", 
+          Colv=F,
+          scale = "none",
+          #breaks = seq(-1, 0.3, length.out = 101),
+          dendrogram="row",
+          reorderfun=function(d, w) reorder(d, w, agglo.FUN = median),
+          symm=F,
+          symkey=F, 
+          symbreaks=T, 
+          hclustfun=hclustfunc, 
+          distfun=distfunc, 
+          key = T,
+          key.title=NA, 
+          key.xlab="Correlation", 
+          col=heat.col)
+dev.off()
+#------------output gene clusters from heatmap data----------------------------------------------------
+t.scaled.data.heatmap <- t(keepgenes)
+table.cluster <- data.frame(keepgenes)
+#write.table(table.cluster, file="Fig1D_heatmap_genecluster_20170724.txt", row.names = T, sep="\t")
+
+```
+
+```{r, fig.height=12, fig.width=6}
+keepgenesplot <- axis.genes %>%
+        tibble::rownames_to_column('gene') %>%
+        filter_if(is.numeric, any_vars(. > 0.25 | .< -0.25))
+
+keepgenes <-keepgenesplot[keepgenesplot$gene %in% genes.to.plot,] 
+rownames(keepgenes) <- keepgenes$gene
+keepgenes <- keepgenes[,-1]
+keepgenes <- as.matrix(keepgenes)
+
+hclustfunc <- function(x) hclust(x, method="complete")#"ward.D", "ward.D2", "single", "complete", "average"
+distfunc <- function(x) dist(x, method="maximum")#"euclidean", "maximum", "manhattan", "canberra", "binary" or "minkowski"
+
+
+#------------Color Palettes----------------------------------------------------
+heat.col = colorRampPalette(rev(c("midnightblue","dodgerblue3","white","goldenrod1","darkorange2")), space="Lab")
+heat.col <- colorRampPalette(c("#440154FF" ,"#414487FF" ,"#2A788EFF", "#7AD151FF" ,"#FDE725FF"), space="Lab")
+heat.col <- colorRampPalette(c("#ffffd9","#c7e9b4","#41b6c4","#1d91c0","#225ea8","#081d58"))
+
+heat.col<-colorRampPalette(c("#132B43","#56B1F7"))
+
+
+#------------Plot heatmap----------------------------------------------------
+#pdf("heatmap_DEgenes_FC2.pdf",width=15,height=7)
+heatmap.2(as.matrix(keepgenes), 
+          trace= "none",
+          density="none", 
+          Colv=F,
+          scale = "none",
+          #breaks = seq(-1, 0.3, length.out = 101),
+          dendrogram="row",
+          reorderfun=function(d, w) reorder(d, w, agglo.FUN = median),
+          symm=F,
+          symkey=F, 
+          symbreaks=T, 
+          hclustfun=hclustfunc, 
+          distfun=distfunc, 
+          key = T,
+          key.title=NA, 
+          key.xlab="Correlation", 
+          col=heat.col)
+
+```
+
+
+
+###############
+##### integrated comparison  Fig S4##### 
+###############
+
+```{r}
+load("../int_data/HMM_integrated.rda")
+
+seurat.meta <- obj.integrated@meta.data
+#seurat.meta$seurat_clusters <- paste0("cl",seurat.meta$seurat_clusters )
+
+
+umap_int_all <- as.data.frame(obj.integrated@reductions$umap@cell.embeddings)
+colnames(umap_int_all) = c("Lim1","Lim2")
+```
+
+```{r}
+
+species.bar <- seurat.meta %>% 
+			select(species_label, seurat_clusters) %>% 
+			group_by(seurat_clusters, species_label) %>%
+			mutate(n = n()) %>%
+			ungroup() %>%
+			group_by(seurat_clusters) %>%
+  			mutate(cluster_n = n(),
+         			frac = n/cluster_n) %>%
+			unique()
+species.bar$seurat_clusters <- factor(species.bar$seurat_clusters,levels=c("cl6","cl3","cl8","cl5","cl9","cl4","cl2","cl0","cl7","cl1"))
+
+
+species.bar.plot <- ggplot(species.bar, aes(x=seurat_clusters,y=frac,fill=species_label)) + geom_bar(position="stack", stat="identity")+
+    scale_fill_manual(values=c("Macaque"="#939598","Human"="#000000","Mouse"="#FF73D0"))  + theme_cowplot()
+species.bar.plot
+
+roi.bar <- seurat.meta %>% 
+      select(dissection_roi, seurat_clusters) %>% 
+      group_by(seurat_clusters, dissection_roi) %>%
+      mutate(n = n()) %>%
+      ungroup() %>%
+      group_by(seurat_clusters) %>%
+        mutate(cluster_n = n(),
+              frac = n/cluster_n) %>%
+      unique()
+roi.bar$seurat_clusters <- factor(roi.bar$seurat_clusters,levels=c("cl8","cl5","cl9","cl3","cl6","cl1","cl7","cl0","cl2","cl4"))
+
+roi.cols <- unique(seurat.meta[,c("roi_color","dissection_roi")])
+roi.cols <- setNames(roi.cols$roi_color, roi.cols$dissection_roi)
+roi.bar.plot <- ggplot(roi.bar, aes(x=seurat_clusters,y=frac,fill=dissection_roi)) + geom_bar(position="stack", stat="identity")+
+    scale_fill_manual(values=roi.cols) 
+roi.bar.plot
+```
+```{r}
+ggsave(file="../analysis_output/HMM_integrated_bar.pdf",gridExtra::marrangeGrob(list(species.bar.plot,roi.bar.plot),nrow = 1,ncol = 1), height=4,width=6)
+
+```
+
+
+```{r}
+varibow <- function(n_colors) {
+  sats <- rep_len(c(0.55,0.7,0.85,1),length.out = n_colors)
+  vals <- rep_len(c(1,0.8,0.6),length.out = n_colors)
+  sub("FF$","",grDevices::rainbow(n_colors, s = sats, v = vals))
+}
+```
+
+```{r}
+
+jet.colors <-colorRampPalette(c("#00007F", "blue", "#007FFF", "cyan","#7FFF7F", "yellow", "#FF7F00", "red", "#7F0000"))
+jet.colors <- varibow(10)
+seurat.cols <- unique(seurat.meta[,c("seurat_clusters")])
+
+meta.col <- setNames(jet.colors, seurat.cols)
+g7 <- plot_RD_meta(umap_int_all, seurat.meta$seurat_clusters,meta.col=meta.col, alpha=0.5, cex=1)
+g7 <- g7 +	ggtitle("seurat_clusters") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() #+ 
+ 		#theme(legend.position="none") 
+g9 <- plot_RD_meta(umap_int_all, seurat.meta$seurat_clusters, alpha=0.5, cex=1)
+g9 <- g9 +	ggtitle("seurat_clusters") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() #+ 
+ 		#theme(legend.position="none") 
+
+
+g7[["data"]]$species <- seurat.meta$species_label
+g8 <- g7 + facet_wrap(~species, ncol=1)
+g9[["data"]]$species <- seurat.meta$species_label
+g10 <- g9 + facet_wrap(~species, ncol=1)
+
+
+g7
+g8
+g9
+g10
+
+
+```
+
+
+```{r}
+ggsave(file="../analysis_output/HMM_integrated_Seurat_umap.pdf",gridExtra::marrangeGrob(list(g7,g9),nrow = 1,ncol = 1), height=5,width=4)
+
+ggsave(file="../analysis_output/HMM_integrated_Seurat_split_umap.pdf",gridExtra::marrangeGrob(list(g8,g10),nrow = 1,ncol = 1), height=15,width=4)
+
+```
+
+```{r}
+seurat.cols <- c(0,1,2,3,4,5,6,7,8,9)
+jet.cols <- c(
+              "#2E9983",
+                "#00FFC5",
+                "#FFD64D",
+                "#EE00FF",
+                "#991746",
+                "#FF0059",
+                "#8F1799",
+                "#999000",
+                "#3C1799",
+                "#00A8FF"
+                  )
+
+cols <- data.frame(cl=seurat.cols, colors = jet.cols)
+meta.col <- setNames(cols$colors, cols$cl)
+
+rd.dat = umap_int_all
+meta=factor(seurat.meta$seurat_clusters,levels=names(meta.col))
+meta.col=meta.col
+alpha.val=0.5
+cex=2
+
+rd.dat = as.data.frame(rd.dat)
+colnames(rd.dat)[1:2] = c("Dim1","Dim2")
+rd.dat$meta = meta
+
+rd.dat = droplevels(rd.dat)
+
+p=ggplot(rd.dat, aes(Dim1, Dim2)) + 
+    geom_point(aes(color=meta),size=cex) +
+    scale_color_manual(values=alpha(as.vector(meta.col[levels(rd.dat$meta)]),alpha.val)) 
+
+
+p=p+ggtitle("roi") +
+    theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+    theme_void() + 
+    theme(legend.position="none") 
+
+p
+```
+
+```{r}
+ggsave(file="../analysis_output/HMM_umap_seurat_altcol2.pdf",p, height=5,width=4)
+```
+
+
+
+### compare_annotate ####
+```{r}
+seurat.meta<-obj.integrated@meta.data
+seurat.meta$cluster.id_all <- paste0(seurat.meta$species_label,"_", seurat.meta$cluster_id)
+seurat.meta$cluster.label_all <- seurat.meta$cluster_label
+
+clcols <- unique(seurat.meta[,c("cluster.id_all", "cluster.label_all", "cluster_color")])
+clcol <- setNames(clcols$cluster_color, clcols$cluster.label_all)
+
+
+ref.cl <- setNames(seurat.meta$cluster.label_all,rownames(seurat.meta))
+cl <- setNames(seurat.meta$seurat_clusters,rownames(seurat.meta))
+cldf <- unique(seurat.meta[,c("species_label", "cluster.id_all","cluster.label_all")])
+rownames(cldf) <- cldf$cluster.label_all
+cldf$cluster_label <- cldf$cluster.label_all
+
+species <- unique(cldf$species_label)
+for(i in species) {
+	#ref.cl.spec <- droplevels(ref.cl[ref.cl %in% row.names(cldf)[cldf$species == i]])
+	ref.cl.spec <- ref.cl[ref.cl %in% row.names(cldf)[cldf$species == i]]
+
+	cl.df.spec <- cldf[cldf$species == i,]
+
+	x<- compare_annotate(cl, ref.cl.spec, cl.df.spec, reorder=FALSE)
+ggsave(file=paste0("../analysis_output/annot_comp_",i,".pdf"),x$g, height=5,width=5)
+}
+
+x<- compare_annotate(cl, ref.cl, cldf, reorder=FALSE)
+annot_plot <- x$g
+
+library(stringr)
+annot_plot[["data"]]$species_label <- str_extract(annot_plot[["data"]]$ref.cl.label , "[^_]+")
+
+p <- annot_plot + coord_flip()
+#p <- p + facet_wrap(~species)
+
+levels <- c("GABA1_M","GABA2_M","GABA3_M","GABA4_M","M_M","P_M","K1_M","K2_M","Pulv_M",
+  "GABA1_H","GABA2_H","GABA3_H","K1_H","K2_H","MP_H",
+  "Chrna1_Mo","Chrna2_Mo","Chrna3_Mo","GABA1_Mo","GABA2_Mo","GABA3_Mo","GABA4_Mo","GABA5_Mo","GABA6_Mo","LGv_Mo","LP_Mo","LGd_Mo" )
+annot_plot[["data"]]$ref.cl.label <- ordered(annot_plot[["data"]]$ref.cl.label, levels=levels)
+p <- annot_plot + coord_flip()
+p
+```
+```{r}
+ggsave(file="../analysis_output/annot_comp_all.pdf",p, height=4,width=5)
+```
+
+
+########################
+#### Cross correlation of cluster genes 
+#### data prep
+########################
+```{r}
+
+load("../int_data/Clustering_Human.rda")
+hum.int <- m.int
+rownames(hum.int@assays[["RNA"]]@data)=tolower(rownames(hum.int@assays[["RNA"]]@data))
+
+load("../int_data/Clustering_Mouse.rda")
+mo.int <- m.int
+rownames(mo.int@assays[["RNA"]]@data)=tolower(rownames(mo.int@assays[["RNA"]]@data))
+
+load("../int_data/Clustering_Macaque.rda")
+ma.int <- m.int
+rownames(ma.int@assays[["RNA"]]@data)=tolower(rownames(ma.int@assays[["RNA"]]@data))
+
+genes<-Reduce(intersect, list(rownames(mo.int@assays[["RNA"]]@data),rownames(ma.int@assays[["RNA"]]@data),rownames(hum.int@assays[["RNA"]]@data)))
+
+mac_exp <- ma.int@assays[["RNA"]]@data[genes,]
+mouse_exp <- mo.int@assays[["RNA"]]@data[genes,]
+human_exp<-hum.int@assays[["RNA"]]@data[genes,]
+
+mac_exp <- t(scale(t(as.matrix(mac_exp))))
+mouse_exp<-t(scale(t(as.matrix(mouse_exp))))
+human_exp<-t(scale(t(as.matrix(human_exp))))
+
+
+mac.cl <- c("GABA1_M","GABA2_M","GABA3_M","GABA4_M","M_M","P_M","K1_M","K2_M","Pulv_M")
+mo.cl <- c( "Chrna1_Mo","Chrna2_Mo","Chrna3_Mo","GABA1_Mo","GABA2_Mo","GABA3_Mo","GABA4_Mo","GABA5_Mo","GABA6_Mo","LGv_Mo","LP_Mo","LGd_Mo" )
+human.cl <- c("GABA1_H","GABA2_H","GABA3_H","K1_H","K2_H","MP_H" )
+
+```
+
+
+##### human vs mouse #####
+```{r}
+
+corr<- data.frame(matrix(NA, ncol=length(mo.cl),nrow=length(human.cl)))
+rownames(corr)<-factor(human.cl,levels=human.cl)
+colnames(corr)<-factor(mo.cl,levels=mo.cl)
+
+p_value <- corr
+
+for (i in mo.cl){
+    for (j in human.cl){
+    	select.cells.i <- seurat.meta$sample_name[seurat.meta$cluster.label_all == i]
+    	select.cells.j <- seurat.meta$sample_name[seurat.meta$cluster.label_all == j]
+    	x=rowMeans(as.matrix(mouse_exp[,select.cells.i]))
+    	#x <- x[!is.na(x)]
+    	y=rowMeans(as.matrix(human_exp[,select.cells.j]))
+    	#y <- y[!is.na(y)]
+    	to.select <- intersect(names(x[!is.na(x)]), names(y[!is.na(y)]))
+    	x <- x[to.select]
+    	y <- y[to.select]
+    	
+    	corr[j,i]<-cor(x,y) 
+
+    	p_value[j,i]<-cor.test(x,y)$p.value
+    }
+}
+
+
+test.m <- melt(as.matrix(corr))
+test.p <- melt(as.matrix(p_value))
+
+for(i in 1:dim(test.m)[1]){
+    if (test.p$value[i]>0.05){
+        test.m$value[i]<- 0
+    }else{
+        test.m$value[i]<-test.m$value[i]
+    }
+}
+
+test.m$X1 <- factor(test.m$X1,levels=human.cl)
+test.m$X2 <- factor(test.m$X2,levels=mo.cl)
+
+
+p.humo <- ggplot(test.m, aes(X2, X1)) + 
+			geom_tile(aes(fill =value),colour = "white")+ 
+			scale_fill_continuous(limits=c(0, 0.3), breaks=seq(0,0.3,by=0.1),low = "white",high = "midnightblue", oob=squish)
+			#scale_fill_gradient2(low = "ivory4", mid = "white", high = "midnightblue", oob=squish)
+#scale_x_discrete(breaks=c(0,5994,7712,9820,11428,11674,11836,11878))
+p.humo<-p.humo+
+		ylab("Human")+
+		xlab("Mouse")+
+		theme(axis.text.x=element_text(size=10, angle=90, hjust=1),
+				axis.title=element_text(size=10,face="bold"),
+				plot.title = element_text(size=10),
+				panel.grid.major = element_blank(), 
+				panel.grid.minor = element_blank(),
+				panel.background = element_blank(), 
+				axis.line = element_line(colour = "black", size = 0.1),
+				axis.ticks.y = element_blank())+
+		ggtitle("correlation between human and mouse clusters")
+print(p.humo)
+
+```
+##### human vs macaque #####
+```{r}
+
+
+corr<- data.frame(matrix(NA, ncol=length(mac.cl),nrow=length(human.cl)))
+rownames(corr)<-factor(human.cl,levels=human.cl)
+colnames(corr)<-factor(mac.cl,levels=mac.cl)
+
+p_value <- corr
+
+for (i in mac.cl){
+    for (j in human.cl){
+    	select.cells.i <- seurat.meta$sample_name[seurat.meta$cluster.label_all == i]
+    	select.cells.j <- seurat.meta$sample_name[seurat.meta$cluster.label_all == j]
+    	x=rowMeans(as.matrix(mac_exp[,select.cells.i]))
+    	#x <- x[!is.na(x)]
+    	y=rowMeans(as.matrix(human_exp[,select.cells.j]))
+    	#y <- y[!is.na(y)]
+    	to.select <- intersect(names(x[!is.na(x)]), names(y[!is.na(y)]))
+    	x <- x[to.select]
+    	y <- y[to.select]
+    	
+    	corr[j,i]<-cor(x,y) 
+
+    	p_value[j,i]<-cor.test(x,y)$p.value
+    }
+}
+
+test.m <- melt(as.matrix(corr))
+test.p <- melt(as.matrix(p_value))
+
+for(i in 1:dim(test.m)[1]){
+    if (test.p$value[i]>0.05){
+        test.m$value[i]<-0
+    }else{
+        test.m$value[i]<-test.m$value[i]
+    }
+}
+
+test.m$X1 <- factor(test.m$X1,levels=human.cl)
+test.m$X2 <- factor(test.m$X2,levels=mac.cl)
+
+
+p.huma <- ggplot(test.m, aes(X2, X1)) + 
+			geom_tile(aes(fill =value),colour = "white")+ 
+			scale_fill_continuous(limits=c(0, 0.6), breaks=seq(0,0.6,by=0.2),low = "white",high = "midnightblue", oob=squish)
+			#scale_fill_gradient2(low = "ivory4", mid = "white", high = "midnightblue", oob=squish)
+p.huma <-p.huma+
+		ylab("Human")+
+		xlab("Macaque")+
+		theme(axis.text.x=element_text(size=10, angle=90, hjust=1),
+				axis.title=element_text(size=10,face="bold"),
+				plot.title = element_text(size=10),
+				panel.grid.major = element_blank(), 
+				panel.grid.minor = element_blank(),
+				panel.background = element_blank(), 
+				axis.line = element_line(colour = "black", size = 0.1),
+				axis.ticks.y = element_blank())+
+		ggtitle("correlation between human and macaque clusters")
+print(p.huma)
+
+```
+
+
+##### macaque vs mouse #####
+```{r}
+
+corr<- data.frame(matrix(NA, ncol=length(mac.cl),nrow=length(mo.cl)))
+rownames(corr)<-factor(mo.cl,levels=mo.cl)
+colnames(corr)<-factor(mac.cl,levels=mac.cl)
+
+p_value <- corr
+
+for (i in mac.cl){
+    for (j in mo.cl){
+    	select.cells.i <- seurat.meta$sample_name[seurat.meta$cluster.label_all == i]
+    	select.cells.j <- seurat.meta$sample_name[seurat.meta$cluster.label_all == j]
+    	x=rowMeans(as.matrix(mac_exp[,select.cells.i]))
+    	#x <- x[!is.na(x)]
+    	y=rowMeans(as.matrix(mouse_exp[,select.cells.j]))
+    	#y <- y[!is.na(y)]
+    	to.select <- intersect(names(x[!is.na(x)]), names(y[!is.na(y)]))
+    	x <- x[to.select]
+    	y <- y[to.select]
+    	
+    	corr[j,i]<-cor(x,y) 
+
+    	p_value[j,i]<-cor.test(x,y)$p.value
+    }
+}
+
+test.m <- melt(as.matrix(corr))
+test.p <- melt(as.matrix(p_value))
+
+for(i in 1:dim(test.m)[1]){
+    if (test.p$value[i]>0.05){
+        test.m$value[i]<-0
+    }else{
+        test.m$value[i]<-test.m$value[i]
+    }
+}
+
+test.m$X1 <- factor(test.m$X1,levels=mo.cl)
+test.m$X2 <- factor(test.m$X2,levels=mac.cl)
+
+
+p.moma <- ggplot(test.m, aes(X1, X2)) + 
+			geom_tile(aes(fill =value),colour = "white")+ 
+			scale_fill_continuous(limits=c(0, 0.3), breaks=seq(0,0.3,by=0.1),low = "white",high = "midnightblue", oob=squish)
+			#scale_fill_gradient2(low = "ivory4", mid = "white", high = "midnightblue", oob=squish)
+p.moma <-p.moma+
+		xlab("Mouse")+
+		ylab("Macaque")+
+		theme(axis.text.x=element_text(size=10, angle=90, hjust=1),
+				axis.title=element_text(size=10,face="bold"),
+				plot.title = element_text(size=10),
+				panel.grid.major = element_blank(), 
+				panel.grid.minor = element_blank(),
+				panel.background = element_blank(), 
+				axis.line = element_line(colour = "black", size = 0.1),
+				axis.ticks.y = element_blank())+
+		ggtitle("correlation between mouse and macaque clusters")
+print(p.moma)
+```
+
+```{r}
+
+ggsave(file="cluster_cor_species.pdf",gridExtra::marrangeGrob(list(p.huma, p.humo, p.moma),nrow = 1, ncol=1), height=5,width=5)
+
+```
+
+
+
+# cluster overlap org vs integrated
+
+
+### dend merge function
+```{r}
+hclust_semisupervised <- function(data, groups, dist_method = "euclidean",dist_p = 10, hclust_method = "ward.D2") {
+    hclist <- lapply(groups, function (group) {
+        hclust(dist(data[group,], method = dist_method, p = dist_p), method = hclust_method)
+    })
+    hc <- .merge_hclust(hclist)
+    data_reordered <- data[unlist(groups),]
+
+    return(list(data = data_reordered, hclust = hc))
+}
+
+.merge_hclust <- function(hclist) {
+    #-- Merge
+    d <- as.dendrogram(hclist[[1]])
+    for (i in 2:length(hclist)) {
+        d <- merge(d, as.dendrogram(hclist[[i]]))
+    }
+    as.hclust(d)
+}
+```
+
+## build dend
+```{r}
+load("../int_data/HMM_integrated.rda")
+
+temp=obj.integrated
+
+seurat.meta<-obj.integrated@meta.data
+seurat.meta$cluster.label_all <- seurat.meta$cluster_label
+seurat.meta$cluster.label_all[seurat.meta$species_label == "Macaque"] <- paste0(seurat.meta$cluster_label,"ac") 
+
+levels <- c("GABA1_Mac","GABA2_Mac","GABA3_Mac","GABA4_Mac","M_Mac","P_Mac","K1_Mac","K2_Mac","Pulv_Mac",
+  "GABA1_H","GABA2_H","GABA3_H","K1_H","K2_H","MP_H",
+  "Chrna1_Mo","Chrna2_Mo","Chrna3_Mo","GABA1_Mo","GABA2_Mo","GABA3_Mo","GABA4_Mo","GABA5_Mo","GABA6_Mo","LGv_Mo","LP_Mo","LGd_Mo" )
+
+seurat.meta$cluster.label_all <- factor(seurat.meta$cluster.label_all, levels=levels)
+cl.nr <-  data.frame(cluster.label_all=unique(seurat.meta$cluster.label_all))
+cl.nr <- cl.nr[order(cl.nr$cluster.label_all),]
+cl.nr <-  data.frame(cluster.label_all=cl.nr)
+cl.nr$cluster.id_all <- 1:nrow(cl.nr)
+  
+seurat.meta <- left_join(seurat.meta, cl.nr)
+
+meanvals=matrix(0,ncol=27,nrow=length(unique(seurat.meta$cluster.label_all)))
+rownames(meanvals)=unique(seurat.meta$cluster.label_all)[order(unique(seurat.meta$cluster.id_all))]
+  for (ii in rownames(meanvals)) {
+    for (jj in 1:ncol(meanvals)) {
+      meanvals[ii,jj]=mean(temp@reductions$pca@cell.embeddings[seurat.meta$sample_name[seurat.meta$cluster.label_all==ii],jj])
+    }
+  }
+  dimval=10
+  distmat=dist((meanvals[,1:dimval]))
+  dend=as.dendrogram(hclust(distmat,method="ward"))
+  plot(dend,hang=-1,main=dimval)
+  
+  #distmat=dist((meanvals[,1:dimval]))
+  #dend=as.dendrogram(hclust(distmat,method="ward"))
+  #plot(dend,hang=-1,main=dimval)
+  dev.off()
+
+
+GA <- unique(seurat.meta$cluster.label_all[seurat.meta$class_label == "GABA"])
+GL <- unique(seurat.meta$cluster.label_all[seurat.meta$class_label == "Glut"])
+
+GA <- as.character(GA)
+GL <- as.character(GL)
+
+
+all_hc <- hclust_semisupervised(meanvals, list(GA, GL))
+                                 
+dend=as.dendrogram(all_hc$hclust)
+
+plot(dend)
+
+
+#save(dend, file="../int_data/dend.rda")
+#ggsave(file="../analysis_output/HMM_integrated_dend.pdf", plot(dend), width = 10, height = 6)
+```
+
+
+
+
+
+
+```{r}
+#load("../int_data/HMM_integrated.rda")
+#load("../int_data/dend.rda")
+sample.combined <- obj.integrated
+
+sample.combined$integrated_clusters <- sample.combined$seurat_clusters
+
+sample.combined$label_for_heatmap <- sample.combined$cluster_label
+sample.combined$label_for_heatmap[sample.combined$species_label == "Macaque"] <- paste0(sample.combined$cluster_label,"ac") 
+
+sample.combined$cluster.id_all <- cl.nr$cluster.id_all[match(sample.combined$label_for_heatmap, cl.nr$cluster.label_all)]
+
+
+```
+## functions
+```{r}
+
+reorder_matrix <- function(matrix1, by.rows = TRUE) {
+  if (by.rows == TRUE) {
+    conf.order <- order(apply(matrix1, 1, which.max))
+    matrix1.reordered <- matrix1[conf.order, ]
+  } else {
+    conf.order <- order(apply(matrix1, 2, which.max))
+    matrix1.reordered <- matrix1[, conf.order]
+  }
+}
+
+
+
+compare_cl <- function(cl, ref.cl,
+                       plot.title = NA, plot.silent = TRUE,
+                       heat.colors = colorRampPalette(c("white", "grey70", "black"))(100),
+                       cluster_rows=NULL,
+                       row.cl.num = min(length(unique(cl)),
+                                        length(unique(ref.cl)))) {
+  library(grid)
+  library(pheatmap)
+  
+  conf1 <- table(cl, ref.cl)
+  conf1 <- sweep(conf1, 1, rowSums(conf1), "/")
+  conf2 <- reorder_matrix(conf1)
+  
+  # Cluster co-occurence
+  cl.prop.cocl <- apply(conf1, 2, function(x) {
+    grid1 <- expand.grid(x, x)
+    min.prop <- apply(grid1, 1, min)
+  })
+  
+  cl.prop.cocl.total <- apply(cl.prop.cocl, 1, sum)
+  cl.prop.cocl.m <- matrix(cl.prop.cocl.total, nrow(conf1), nrow(conf1),
+                           dimnames = list(rownames(conf1), rownames(conf1)))
+  
+  ph1 <- pheatmap(conf2, cutree_rows = row.cl.num, clustering_method = "ward.D2", cluster_rows = cluster_rows,
+                  # annotation_row = ref.cl.anno[, -grep("cluster_label", colnames(ref.cl.anno))],
+                  color = heat.colors, fontsize = 6,
+                  main = plot.title, silent = plot.silent)
+  return(list(conf = conf2, cocl = cl.prop.cocl.m, ph = ph1))
+}
+```
+
+
+```{r}
+heat.colors <- colorRampPalette(c("white", "grey70", "black"))(100)
+heat.colors <- colorRampPalette(c("white","midnightblue"))(200)
+```
+
+# Compare clustering
+
+```{r}
+ref.cl <- sample.combined$label_for_heatmap
+cca.cl <- sample.combined$integrated_clusters
+compare.species <- c("Mac","H","Mo")
+
+cl.conf <- compare_cl(ref.cl, cca.cl, cluster_rows = all_hc[["hclust"]])
+cocl <- cl.conf$cocl
+
+grid.draw(cl.conf[["ph"]]$gtable)
+```
+
+
+
+```{r}
+#load("../int_data/dend.rda")
+library(reshape2)
+dend.order <- labels(dend)
+
+cl.conf.m <- cl.conf["conf"]
+cl.conf.m <- melt(cl.conf.m)
+cl.conf.m <- as.data.frame(cl.conf.m)
+cl.conf.m$ref.cl <- paste0("cl",cl.conf.m$ref.cl)
+
+cl.conf.m$cl <- factor(cl.conf.m$cl , levels=dend.order)
+cl.conf.m$ref.cl <- factor(cl.conf.m$ref.cl ,                levels=rev(c("cl6","cl3","cl8","cl5","cl9","cl4","cl2","cl0","cl7","cl1")))
+
+#cl.conf.m$species <-ifelse(grepl("_Mo",cl.conf.m$cl),"Mouse",ifelse(grepl("_H",cl.conf.m$cl),"Human", "Macaque"))
+#cl.conf.m$species <- factor(cl.conf.m$species , levels=c("Macaque","Human","Mouse"))
+
+
+
+p.cocl <- ggplot(cl.conf.m, aes(cl, ref.cl)) + 
+			geom_tile(aes(fill =value),colour = "grey90")+ 
+			scale_fill_continuous(limits=c(0, 1), breaks=seq(0,1,by=0.25),low = "white",high = "midnightblue", oob=squish)
+			#scale_fill_gradient2(low = "ivory4", mid = "white", high = "midnightblue", oob=squish)
+p.cocl <-p.cocl+
+		xlab("Species indepent cluster")+
+		ylab("Integrated cluster")+
+		theme(axis.text.x=element_text(size=10, angle=90, hjust=1,vjust=0.5),
+				axis.title=element_text(size=10,face="bold"),
+				plot.title = element_text(size=10),
+				panel.grid.major = element_blank(), 
+				panel.grid.minor = element_blank(),
+				panel.background = element_blank(), 
+				axis.line = element_line(colour = "black", size = 0.1))
+print(p.cocl)
+
+```
+
+```{r}
+
+p.cocl.s <- p.cocl + facet_wrap(~species, scales="free_x")
+p.cocl.s
+
+
+# convert ggplot object to grob object
+gp <- ggplotGrob(p.cocl.s)
+
+# optional: take a look at the grob object's layout
+gtable::gtable_show_layout(gp)
+
+# get gtable columns corresponding to the facets (5 & 9, in this case)
+facet.columns <- gp$layout$l[grepl("panel", gp$layout$name)]
+
+# get the number of unique x-axis values per facet (1 & 3, in this case)
+x.var <- sapply(ggplot_build(p.cocl.s)$layout$panel_scales_x,
+                function(l) length(l$range$range))
+
+# change the relative widths of the facet columns based on
+# how many unique x-axis values are in each facet
+gp$widths[facet.columns] <- gp$widths[facet.columns] * x.var
+
+# plot result
+grid::grid.draw(gp)
+```
+
+```{r}
+ggsave(file="../analysis_output/HMM_cluster_cor_species_grid.pdf",p.cocl, height=5,width=8)
+ggsave(file="../analysis_output/HMM_cluster_cor_species_grid_split.pdf",p.cocl.s, height=5,width=8)
+
+ggsave(file="../analysis_output/HMM_integrated_dend.pdf",plot(dend), height=3,width=8)
+
+
+```
+
+
+
+
+
+
+
+
+```{r}
+
+#"Macaque" "Human"   "Mouse" 
+
+cocl.subset <- cocl[grepl(compare.species[2], row.names(cocl)),
+                    grepl(compare.species[3], row.names(cocl))] #change 3 to 2 for marmoset comparison
+
+row.names(cocl.subset) <- sub(paste0(compare.species[2], "_"), "",
+                              row.names(cocl.subset))
+
+colnames(cocl.subset) <- sub(paste0(compare.species[3], "_"), "", #change 3 to 2 for marmoset comparison
+                             colnames(cocl.subset))
+
+
+dend.order <- labels(dend)
+cl.order <- intersect(dend.order, row.names(cocl.subset))
+cocl.subset2 <- reorder_matrix(cocl.subset[cl.order, ], by.rows = FALSE)
+
+
+grid.draw(cl.conf[["ph"]]$gtable)
+
+library(fpc)
+clus.method <- "single"
+
+clus.num <- pamk(cocl, 1:(min(nrow(cocl), ncol(cocl)) - 1))$nc
+
+ph1 <- pheatmap(cocl.subset, clustering_method = clus.method,
+                cutree_cols = clus.num, cutree_rows = clus.num,
+                color = heat.colors,
+                fontsize = 6)
+
+ph1 <- pheatmap(cocl.subset, clustering_method = clus.method,
+                cutree_cols = clus.num, cutree_rows = clus.num,
+                color = heat.colors,
+                fontsize = 6)
+
+pheatmap(cocl.subset2, cluster_rows = FALSE, cluster_cols = FALSE,
+         color = heat.colors,
+         fontsize = 6)
+         
+         
+pheatmap(
+  mat               = cocl,
+  color             = heat.colors,
+  #breaks            = mat_breaks,
+  #border_color      = NA,
+  cluster_cols      = mat_cluster_cols,
+  #cluster_rows      = mat_cluster_rows,
+  #show_colnames     = FALSE,
+  #show_rownames     = FALSE,
+  #annotation_col    = mat_col,
+  #annotation_colors = mat_colors,
+  drop_levels       = TRUE,
+  fontsize          = 6,
+  main              = "Sorted Dendrograms"
+)
+```

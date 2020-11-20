@@ -25,45 +25,73 @@
 #' # examples
 #' # seu <- doubletFinder(seu, expected.doublets = 1000, proportion.artificial = 0.25, proportion.NN = 0.01)
 #' 
-doubletFinder <- function(data, select.genes, proportion.artificial = 0.20,
-                          k = pmin(100, ncol(data) * 0.01)) {
-  library(RANN)
-  
-  ## Step 1: Generate artificial doublets from Seurat object input
-  print("Creating artificial doublets...")
-  real.cells <- colnames(data)
-  
-  n_real.cells <- length(real.cells)
-  n_doublets <- round(n_real.cells/(1-proportion.artificial)-n_real.cells)
-  real.cells1 <- sample(real.cells, n_doublets, replace = TRUE)
-  real.cells2 <- sample(real.cells, n_doublets, replace = TRUE)
-  doublets <- (data[ , real.cells1] + data[ , real.cells2])
-  colnames(doublets) <- paste("X", 1:n_doublets, sep="")
-  
-  data_wdoublets <- cbind(data, doublets)  
-  norm.dat = logCPM(data_wdoublets)
-  
-  print("Running PCA")
-  if(ncol(data) > 10000){
-    sampled.cells = sample(1:ncol(data), pmin(ncol(data),10000))
-    rd.dat = rd_PCA(norm.dat, select.genes=select.genes, select.cells= colnames(data_wdoublets), th=0, max.pca=50, sampled.cells= sampled.cells)#$rd.dat
-  }else{
-    rd.dat = rd_PCA(norm.dat, select.genes=select.genes, select.cells= colnames(data_wdoublets), th=0, max.pca=50)#$rd.dat
-  }
-  print("Initialize pANN structure") 
-  knn.result = RANN::nn2(rd.dat, k=k)
-  knn.idx = knn.result[[1]]
-  knn.dist = knn.result[[2]]
-  
-  num = ncol(data)
-  knn.result1 = RANN::nn2(rd.dat[1:num,], rd.dat[(num+1):nrow(rd.dat),], k = 10)
-  knn.dist1 = knn.result1[[2]]
-  
-  dist.th = mean(as.vector(knn.dist1)) + 1.64 * sd(as.vector(knn.dist1))
-  
-  doublet.freq = knn.idx  > ncol(data) & knn.dist < dist.th
-  doublet.freq =  doublet.freq[1:ncol(data),]
-  row.names(doublet.freq) = colnames(data)
-  doublet.score = pmax(rowMeans(doublet.freq),rowMeans(doublet.freq[,1:ceiling(k/2)]))
-  return(doublet.score)
+doubletFinder <- function (data, select.genes, proportion.artificial = 0.2, k = NULL, 
+    plot = FALSE) 
+{
+    if (is.null(k)) {
+        k <- round(pmin(100, ncol(data) * 0.01))
+        k <- round(pmax(10, k))
+    }
+    library(RANN)
+    print("Creating artificial doublets...")
+    real.cells <- colnames(data)
+    n_real.cells <- length(real.cells)
+    n_doublets <- round(n_real.cells/(1 - proportion.artificial) - 
+        n_real.cells)
+    real.cells1 <- sample(real.cells, n_doublets, replace = TRUE)
+    real.cells2 <- sample(real.cells, n_doublets, replace = TRUE)
+    doublets <- (data[, real.cells1] + data[, real.cells2])
+    colnames(doublets) <- paste("X", 1:n_doublets, sep = "")
+    data_wdoublets <- cbind(data, doublets)
+    norm.dat = scrattch.hicat::logCPM(data_wdoublets)
+    print("Running PCA")
+    if (ncol(data) > 10000) {
+        sampled.cells = sample(1:ncol(data), pmin(ncol(data), 
+            10000))
+        rd.dat = rd_PCA(norm.dat, select.genes = select.genes, 
+            select.cells = colnames(data_wdoublets), th = 0, 
+            max.pca = 50, sampled.cells = sampled.cells)
+    }
+    else {
+        rd.dat = rd_PCA(norm.dat, select.genes = select.genes, 
+            select.cells = colnames(data_wdoublets), th = 0, 
+            max.pca = 50)
+    }
+    #rd.dat <- rd.dat$rd.dat
+    print("Initialize pANN structure")
+    knn.result = RANN::nn2(rd.dat, k = k)
+    knn.idx = knn.result[[1]]
+    knn.dist = knn.result[[2]]
+    num = ncol(data)
+    knn.result1 = RANN::nn2(rd.dat[1:num, ], rd.dat[(num + 1):nrow(rd.dat), 
+        ], k = 10)
+    knn.dist1 = knn.result1[[2]]
+    dist.th = mean(as.vector(knn.dist1)) + 1.64 * sd(as.vector(knn.dist1))
+    doublet.freq = knn.idx > ncol(data) & knn.dist < dist.th
+    doublet.score = pmax(rowMeans(doublet.freq), rowMeans(doublet.freq[, 
+        1:ceiling(k/2)]))
+    names(doublet.score) = row.names(rd.dat)
+    artificial.doublet.score = doublet.score[colnames(doublets)]
+    doublet.score = doublet.score[colnames(data)]
+    if (plot == TRUE) {
+        print("plotting")
+        ds = pmax(rowMeans(doublet.freq), rowMeans(doublet.freq[, 
+            1:ceiling(k/2)]))
+        ds = as.data.frame(ds)
+        ds$sample <- colnames(data_wdoublets)
+        ds$group <- ""
+        idx <- startsWith(ds$sample, "X")
+        ds[idx, "group"] <- "artifical doublets"
+        idx <- !startsWith(ds$sample, "X")
+        ds[idx, "group"] <- "samples"
+        plot.title <- gsub("^.*?-", "", ds[1, 2])
+        p = ggplot2::ggplot(ds, aes(x = ds, fill = group, 
+            color = group)) + geom_density(alpha = 0.4) + scale_color_manual(values = c("#F9627D", 
+            "#2F3061")) + scale_fill_manual(values = c("#F9627D", 
+            "#2F3061")) + labs(title = plot.title)
+        return(list(doublet.score, artificial.doublet.score, p))
+    }
+    else {
+        return(list(doublet.score, artificial.doublet.score))
+    }
 }

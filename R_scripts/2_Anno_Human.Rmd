@@ -1,0 +1,283 @@
+---
+title: "Human Anno"
+author: "Cy"
+date: "8/31/2020"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+
+```{r include=FALSE}
+library(dplyr)
+library(Seurat)
+library(ggplot2)
+library(cowplot)
+library(scrattch.hicat)
+library(feather)
+require(Matrix)
+require(scrattch.vis)
+library(SeuratWrappers)
+source("hicat_modules.r")
+
+load("../int_data/collected_data_20200818.rda")
+load("../int_data/Clustering_Human.rda")
+```
+
+
+### Generate annotation file
+
+```{r}
+spec="human"
+
+keepgen=grep("^LOC|^MT-|^RPL|^RPS|^SNAR|^CT45|^MIR|^MTND|[0-9]P$|-AS|-PS|DUX4L",rownames(datlist[[spec]]),val=T,invert=T)
+  keepdons=which(metalist$human$external_donor_name_label %in% c("H200.1023","H200.1025","H200.1030"))
+  datlist[[spec]]=datlist[[spec]][keepgen,keepdons]
+  datlist[[spec]]@x=datlist[[spec]]@x/rep.int(Matrix::colSums(datlist[[spec]]),diff(datlist[[spec]]@p))*10^6
+
+
+```
+
+```{r}
+allcl=data.frame(sample_name=colnames(m.int@assays$RNA),cluster_id=1,cluster_label=0,cluster_color="black",stringsAsFactors = F)
+rownames(allcl)=allcl$sample_name
+
+
+#Assign cluster
+
+#m.int4 - cl0 == MP
+#m.int5 - cl0 == K1
+#m.int5 - cl1 == K2
+#m.int6 - cl0 == GABA1
+#m.int6 - cl1 == GABA2
+#m.int6 - cl2 == GABA3
+#m.int7 - cl0 == Oligo
+#m.int7 - cl1 == Astro
+#m.int7 - cl2 == OPC
+#m.int7 - cl3 == Micro
+
+
+allcl[names(m.int4@active.ident)[m.int4@active.ident ==0],"cluster_label"] <- "MP"
+
+allcl[names(m.int5@active.ident)[m.int5@active.ident ==0],"cluster_label"] <- "K1"
+allcl[names(m.int5@active.ident)[m.int5@active.ident ==1],"cluster_label"] <- "K2"
+
+allcl[names(m.int6@active.ident)[m.int6@active.ident ==0],"cluster_label"] <- "GABA1"
+allcl[names(m.int6@active.ident)[m.int6@active.ident ==1],"cluster_label"] <- "GABA2"
+allcl[names(m.int6@active.ident)[m.int6@active.ident ==2],"cluster_label"] <- "GABA3"
+
+allcl[names(m.int7@active.ident)[m.int7@active.ident ==0],"cluster_label"] <- "Oligo"
+allcl[names(m.int7@active.ident)[m.int7@active.ident ==1],"cluster_label"] <- "Astro"
+allcl[names(m.int7@active.ident)[m.int7@active.ident ==2],"cluster_label"] <- "OPC"
+allcl[names(m.int7@active.ident)[m.int7@active.ident ==3],"cluster_label"] <- "Micro"
+
+
+#Assign class
+#allcl$class_label[rownames(allcl) %in% colnames(m.int6@assays$RNA)] <- "GABA"
+#allcl$class_label[rownames(allcl) %in% colnames(m.int7@assays$RNA)] <- "Non-Neuronal"
+#allcl$class_label[rownames(allcl) %in% colnames(m.int3@assays$RNA)] <- "Glut"
+
+# Add donor and roi info  
+allcl$donor=metalist[[spec]]$external_donor_name_label[match(allcl$sample_name,rownames(metalist[[spec]]))]
+
+allcl$roi_ap=metalist[[spec]]$roi_label[match(allcl$sample_name,rownames(metalist[[spec]]))]
+
+allcl$gender=metalist[[spec]]$gender_label[match(allcl$sample_name,rownames(metalist[[spec]]))]
+
+allcl$roi <-sub("\\-.*", "", allcl$roi_ap)
+
+#save(allcl,file="../int_data/human_allcl.rda")
+
+cl.df <- allcl %>% group_by(cluster_id, cluster_label) %>% summarise(n=n())
+
+#write.csv(cl.df, file="../int_data/Human.cl.df.csv")
+```
+
+```{r}
+
+cl.df <- read.csv("../int_data/Human.cl.df.csv")
+load("../int_data/human_allcl.rda")
+
+allcl <- allcl[,c(1,3,5:8)]
+allcl <- left_join(allcl,cl.df)
+
+rownames(allcl) <- allcl$sample_name
+
+
+roi_palette <- read.csv("../data/roi_palette.csv")
+allcl <- left_join(allcl, select(roi_palette, roi, roi_color), by=c("roi_ap"="roi"))
+
+donor_palette <- read.csv("../data/donor_palette.csv")
+allcl <- left_join(allcl, select(donor_palette, donor, donor_color))
+
+rownames(allcl) <- allcl$sample_name
+
+save(allcl,file="../int_data/human_allcl.rda")
+
+```
+
+
+### UMAP plots - plot_objects
+```{r}
+#allcl <- allcl[allcl$class_label != "Low Quality",]
+
+plot_objects=list()
+subcells=list()
+subcells[["all"]] <- allcl$sample_name
+subcells[["neuron"]] <- subset(allcl$sample_name, allcl$class_label != "Non-Neuronal" )
+subcells[["mp"]] <- subset(allcl$sample_name, allcl$cluster_label == "MP" )
+subdat=datlist[[spec]][,allcl$sample_name]
+subdat=sweep(subdat,2,Matrix::colSums(subdat),"/")*10^6
+for (nam in names(subcells)) {
+    keepcells=subcells[[nam]]
+    m.overall <- CreateSeuratObject(counts = subdat[,keepcells], meta.data = allcl[keepcells,])    
+    m.overall <- NormalizeData(object =m.overall)
+    if(nam == "mp") {m.overall <- ScaleData(object = m.overall, verbose=FALSE,vars.to.regress = "donor")
+} else {
+    m.overall <- ScaleData(object =m.overall, verbose = FALSE)}
+    m.overall <- FindVariableFeatures(object =m.overall, selection.method = "vst", top.genes = 2000)
+    m.overall <- RunPCA(object =m.overall, npcs = 30, verbose = FALSE)
+    m.overall <- RunTSNE(object =m.overall, reduction = "pca", dims = 1:15)
+    m.overall <- RunUMAP(object =m.overall, reduction = "pca", dims = 1:15)
+    plot_objects[[nam]]=m.overall
+    print(nam)
+  }
+
+#save(plot_objects,file="../int_data/human_plotobjects.rda")
+
+```
+
+
+```{r}
+
+DimPlot(plot_objects[["all"]], group.by = "donor")
+DimPlot(plot_objects[["all"]], group.by = "cluster_label")
+DimPlot(plot_objects[["all"]], group.by = "roi")
+
+DimPlot(plot_objects[["neuron"]], group.by = "donor")
+DimPlot(plot_objects[["neuron"]], group.by = "cluster_label")
+DimPlot(plot_objects[["neuron"]], group.by = "roi")
+
+DimPlot(plot_objects[["mp"]], group.by = "donor")
+DimPlot(plot_objects[["mp"]], group.by = "cluster_label")
+DimPlot(plot_objects[["mp"]], group.by = "roi")
+```
+
+
+```{r}
+#pdf("analysis_output/human_dendrograms.pdf")
+dends <- c("all", "neuron")
+for (nam in dends){
+  temp=plot_objects[[nam]]
+  meanvals=matrix(0,ncol=20,nrow=length(unique(allcl$cluster_label[allcl$sample_name %in% temp$sample_name])))
+  rownames(meanvals)=unique(allcl$cluster_label[allcl$sample_name %in% temp$sample_name])#[order(unique(allcl$cluster_id[allcl$sample_name %in% temp$sample_name]))]
+    for (ii in rownames(meanvals)) {
+    for (jj in 1:ncol(meanvals)) {
+        meanvals[ii,jj]=mean(temp@reductions$pca@cell.embeddings[allcl$sample_name[allcl$cluster_label==ii],jj])
+    }
+  }
+    distmat=dist((meanvals))
+    dend=as.dendrogram(hclust(distmat,method="ward.D2"))
+    dend=reorder(dend,(1:8)^2)
+    plot(dend)
+
+    }
+    dev.off()
+
+```
+
+
+```{r}
+
+cl.df <- read.csv("../int_data/Human.cl.df.csv", stringsAsFactors = FALSE)
+load("../int_data/human_allcl.rda")
+
+colnames(allcl)[2] <- "org_cl.lab"
+
+allcl <- allcl[,-c(7:8)]
+allcl <- left_join(allcl,select(cl.df, org_cl.lab, cluster_label, cluster_id, cluster_color))
+
+rownames(allcl) <- allcl$sample_name
+
+allcl <- allcl[,c(1,17:19,7:12,3,16,4,6,15,5)]
+
+save(allcl,file="../int_data/human_allcl.rda")
+
+```
+
+
+
+### UMAP plots - plot_objects
+```{r}
+#allcl <- allcl[allcl$class_label != "Low Quality",]
+
+plot_objects=list()
+subcells=list()
+subcells[["all"]] <- allcl$sample_name
+subcells[["neuron"]] <- subset(allcl$sample_name, allcl$class_label != "Non-Neuronal" )
+subcells[["mp"]] <- subset(allcl$sample_name, allcl$cluster_label == "MP" )
+subdat=datlist[[spec]][,allcl$sample_name]
+subdat=sweep(subdat,2,Matrix::colSums(subdat),"/")*10^6
+for (nam in names(subcells)) {
+    keepcells=subcells[[nam]]
+    m.overall <- CreateSeuratObject(counts = subdat[,keepcells], meta.data = allcl[keepcells,])    
+    m.overall <- NormalizeData(object =m.overall)
+    if(nam == "mp") {
+      m.overall <- ScaleData(object = m.overall, verbose=FALSE,vars.to.regress = "donor") } else { m.overall <- ScaleData(object =m.overall, verbose = FALSE)           }
+    m.overall <- FindVariableFeatures(object =m.overall, selection.method = "vst", top.genes = 2000)
+    m.overall <- RunPCA(object =m.overall, npcs = 30, verbose = FALSE)
+    m.overall <- RunTSNE(object =m.overall, reduction = "pca", dims = 1:15)
+    m.overall <- RunUMAP(object =m.overall, reduction = "pca", dims = 1:15)
+    plot_objects[[nam]]=m.overall
+    print(nam)
+  }
+
+save(plot_objects,file="../int_data/human_plotobjects.rda")
+
+```
+
+
+```{r}
+
+DimPlot(plot_objects[["all"]], group.by = "donor")
+DimPlot(plot_objects[["all"]], group.by = "cluster_label")
+DimPlot(plot_objects[["all"]], group.by = "roi")
+
+DimPlot(plot_objects[["neuron"]], group.by = "donor")
+DimPlot(plot_objects[["neuron"]], group.by = "cluster_label")
+DimPlot(plot_objects[["neuron"]], group.by = "roi")
+
+DimPlot(plot_objects[["mp"]], group.by = "donor")
+DimPlot(plot_objects[["mp"]], group.by = "cluster_label")
+DimPlot(plot_objects[["mp"]], group.by = "roi")
+```
+
+```{r}
+pdf("../analysis_output/human_dendrograms.pdf")
+dends <- c("all", "neuron")
+for (nam in dends){
+  temp=plot_objects[[nam]]
+  meanvals=matrix(0,ncol=20,nrow=length(unique(allcl$cluster_label[allcl$sample_name %in% temp$sample_name])))
+  rownames(meanvals)=unique(allcl$cluster_label[allcl$sample_name %in% temp$sample_name])[order(unique(allcl$cluster_id[allcl$sample_name %in% temp$sample_name]))]
+    for (ii in rownames(meanvals)) {
+    for (jj in 1:ncol(meanvals)) {
+        meanvals[ii,jj]=mean(temp@reductions$pca@cell.embeddings[allcl$sample_name[allcl$cluster_label==ii],jj])
+    }
+  }
+    distmat=dist((meanvals))
+    dend=as.dendrogram(hclust(distmat,method="ward.D2"))
+    dend=reorder(dend,(1:8)^2)
+    plot(dend)
+
+    }
+   dev.off()
+
+```
+
+```{r, eval = FALSE, echo = FALSE}
+
+save(plot_objects,file="int_data/human_plotobjects.rda")
+
+```
+

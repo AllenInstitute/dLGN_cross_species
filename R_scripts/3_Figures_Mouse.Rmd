@@ -1,0 +1,753 @@
+---
+title: "3_Figures_Mouse"
+author: "Cy"
+date: "09/09/2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+
+```{r workspace}
+
+library(dplyr)
+library(Seurat)
+library(ggplot2)
+library(cowplot)
+library(scrattch.hicat)
+library(feather)
+require(Matrix)
+require(scrattch.vis)
+#library(SeuratWrappers)
+library(dendextend)
+library(gridExtra)
+source("../R_scripts/hicat_modules.r")
+```
+
+
+
+```{r}
+load("../int_data/collected_data_20200818.rda")
+load("../int_data/mouse_plotobjects.rda")
+load("../int_data/mouse_allcl.rda")
+
+allcl <- allcl[allcl$class_label != "Low Quality",]
+rownames(allcl) <- allcl$sample_name
+```
+
+
+### dend merge function
+```{r}
+hclust_semisupervised <- function(data, groups, dist_method = "euclidean",dist_p = 10, hclust_method = "ward.D2") {
+    hclist <- lapply(groups, function (group) {
+        hclust(dist(data[group,], method = dist_method, p = dist_p), method = hclust_method)
+    })
+    hc <- .merge_hclust(hclist)
+    data_reordered <- data[unlist(groups),]
+
+    return(list(data = data_reordered, hclust = hc))
+}
+
+.merge_hclust <- function(hclist) {
+    #-- Merge
+    d <- as.dendrogram(hclist[[1]])
+    for (i in 2:length(hclist)) {
+        d <- merge(d, as.dendrogram(hclist[[i]]))
+    }
+    as.hclust(d)
+}
+```
+
+
+
+```{r}
+#pdf("../analysis_output/mouse_dendrograms.pdf")
+
+temp=plot_objects[["all"]]
+  meanvals=matrix(0,ncol=30,nrow=length(unique(allcl$cluster_label)))
+  rownames(meanvals)=unique(allcl$cluster_label)[order(unique(allcl$cluster_id))]
+  for (ii in rownames(meanvals)) {
+    for (jj in 1:ncol(meanvals)) {
+      meanvals[ii,jj]=mean(temp@reductions$pca@cell.embeddings[allcl$sample_name[allcl$cluster_label==ii],jj])
+    }
+  }
+
+cl.df <- read.csv("../int_data/mouse.cl.df.csv")
+  
+GA <- cl.df$cluster_label[cl.df$class_label == "GABA"]
+GL <- cl.df$cluster_label[cl.df$class_label == "Glut"]
+NN <- cl.df$cluster_label[cl.df$class_label == "Non-Neuronal"]
+
+GA <- as.character(GA)
+GL <- as.character(GL)
+NN <- as.character(NN)
+
+
+all_hc <- hclust_semisupervised(meanvals, list(GA, GL, NN))
+                                 
+dend=as.dendrogram(all_hc$hclust)
+
+plot(dend)
+
+cl.size <- allcl %>% group_by(cluster_id, cluster_label) %>% summarise(n=n())
+dend <- dend %>% set("labels", cl.size$n)
+plot(dend)
+
+N_hc <- hclust_semisupervised(meanvals, list(GA, GL))
+dend.N=as.dendrogram(N_hc$hclust)
+plot(dend.N)
+
+dend.N <- dend.N %>% set("labels", cl.size$n[1:12])
+plot(dend.N)
+
+
+
+#dev.off()
+
+
+```
+
+
+
+
+# Violin plot prep
+```{r}
+spec="mouse"
+keepgen=grep("^LOC|^mt-|^Rpl|^Rps",rownames(datlist[[spec]]),val=T,invert=T)
+  datlist[[spec]]=datlist[[spec]][keepgen,]
+  datlist[[spec]]@x=datlist[[spec]]@x/rep.int(Matrix::colSums(datlist[[spec]]),diff(datlist[[spec]]@p))*10^6
+
+m.all <- plot_objects[["all"]]
+Idents(m.all) <- "cluster_label"
+
+m.lgd <- plot_objects[["lgd"]]
+Idents(m.lgd) <- "cluster_label"
+
+m.neuron <- plot_objects[["neuron"]]
+Idents(m.neuron) <- "cluster_label"
+
+
+```
+
+
+
+
+```{r, echo=T, fig.height=5}
+
+## gabaergic cells
+plot2 <- DotPlot(m.all,features=c("Gad2","Gata3","Chrna6", "Dlx2", "Gata2", "Tal1", "Dlx6", "Dlx5", "Isl1")
+)
+plot2 + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) 
+
+
+## chrna
+plot2 <- DotPlot(m.all,features=c("Sox14","Pvalb","Spata20","Rspo2","Htr1a", "Eltd1","Col25a1","Pcdh10","Otx1","Syt10","Ngb","Scnn1a","Shox2", "Dlx5","Cbln2", "Chrna6", "Dscaml1","Pax7", "Plac9a"))
+plot2 + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) 
+```
+
+
+x <- markers[markers$cluster == "LGv",]
+
+```{r, echo=T, fig.height=10, fig.width=6}
+subset <- subset(m.all, idents = c("Chrna1","Chrna2","Chrna3","GABA1","GABA2","GABA3","GABA4","GABA5","GABA6"))
+genes<-c("Snap25", "Gad2",
+         "Dmbx1","Chrna6","Styk1","Olfm3", # Chrna1
+         "Nrp2","Pax7","Pde3a", # Chrna2
+         "Zmynd19", "Dapk3",# Chrna3
+         "Dlx6","Gata2","Pvalb","Isl1", # GABA1
+         "Spata20","Pax6", # GABA2
+         "Htr1a","Dab1", # GABA3
+         "Eltd1", "Penk","Ldb2",# GABA4
+         "Dlx5","Stc1",# GABA5
+         "Rspo2","Sstr2","Rprm","Syt10",# GABA6
+         "Slc17a6","Slc17a7", "Neurod6","Rspo3","Nrgn","Lamp5","Arc", # LGv
+         "Calb1","Calb2","Kirrel3","Gpr4",# LP
+         "Scn4b","Plekhg1","Prkcd",# LGd
+         "Mbp","Mog","Opalin","Ermn", # Oligo1
+         "Olig2","Pdgfra", # Oligo2
+         "Bmp4" # Oligo3
+            )
+
+
+plot2 <- DotPlot(m.all,features=genes)
+plot2 <- plot2+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) + coord_flip()
+
+plot2
+```
+
+```{r, echo=T, fig.height=10, fig.width=6}
+#subset <- subset(m.all, idents = c("Chrna1","Chrna2","Chrna3","GABA1","GABA2","GABA3","GABA4","GABA5","GABA6"))
+
+genes<-c( "Gad2","Chrna6","Syt4","Lrrtm3",
+          "Styk1","Olfm3","Cd24a", # Chrna1
+         "Nrp2","Pax7","Pde3a","Tac1", # Chrna2
+         "Zmynd19", "Dapk3",# Chrna3
+         "Pvalb","Trh", # GABA1
+         "Pax6", "Pou6f2","Cartpt",# GABA2
+         "Htr1a","Dab1", # GABA3
+         "Cbln2", "Penk",# GABA4
+         "Dlx6","Stc1",# GABA5
+         "Ngb","Rprm","Syt10"# GABA6
+                  )
+
+
+plot3 <- DotPlot(subset,features=genes,  cols = c("lightgrey", "deeppink3"))
+plot3 <- plot3+ theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +  coord_flip(xlim=NULL, ylim=NULL) 
+plot3
+
+
+ggsave("../analysis_output/mo_dotplot_annos.pdf",plot3,height=10,width=6, useDingbats=FALSE)
+
+```
+
+```{r}
+markers <- FindAllMarkers(subset)
+```
+```{r}
+test <- markers[markers$cluster == "Chrna3",]
+test$diff <- test$pct.1-test$pct.2 
+
+```
+
+
+```{r}
+test <- FindMarkers(subset, ident.1 = c("GABA1","GABA2","GABA3","GABA4","GABA5","GABA6"), ident.2 = c("Chrna2","Chrna1","Chrna3"))
+test$diff <- test$pct.1-test$pct.2 
+```
+
+             
+### violin plot ALL clusters                                     
+```{r violin ALL, echo=F, quietly=T, fig.height=12, fig.width=5}
+sampdat=data.frame(sample_name=allcl$sample_name,t(as.matrix(datlist[[spec]][,allcl$sample_name])))
+
+plot <- group_violin_plot(sampdat,allcl,grouping="cluster",
+                    genes=c("Snap25", "Gad2",
+         "Dmbx1","Chrna6","Styk1","Olfm3", # Chrna1
+         "Nrp2","Pax7","Pde3a", # Chrna2
+         "Zmynd19", "Dapk3",# Chrna3
+         "Dlx6","Gata2","Pvalb","Isl1", # GABA1
+         "Spata20","Pax6", # GABA2
+         "Htr1a","Dab1", # GABA3
+         "Eltd1", "Penk","Ldb2",# GABA4
+         "Dlx5","Stc1",# GABA5
+         "Rspo2","Sstr2","Rprm","Syt10",# GABA6
+         "Slc17a6","Slc17a7", "Neurod6","Rspo3","Nrgn","Lamp5","Arc", # LGv
+         "Calb1","Calb2","Necab1","Gpr4",# LP
+         "Scn4b","Plekhg1","Prkcd",# LGd
+         "Mog","Opalin","Ermn", # Oligo1
+         "Olig2","Pdgfra", # Oligo2
+         "Bmp4" # Oligo3
+            ),
+                    log_scale=F,
+                    label_height=15,
+                    max_width=25)
+
+
+plot
+
+#ggsave(plot,file="../analysis_output/mouse_violin_ALL_plot.pdf",height=12,width=4, useDingbats=FALSE)
+```
+             
+### violin plot NN clusters                                     
+```{r violin ALL, echo=F, quietly=T, fig.height=4, fig.width=4}
+sampdat=data.frame(sample_name=allcl$sample_name,t(as.matrix(datlist[[spec]][,allcl$sample_name])))
+
+plot <- group_violin_plot(sampdat,allcl,grouping="cluster",
+                    genes=c( "Mog","Opalin","Ermn", # Oligo1
+         "Olig2","Pdgfra", # Oligo2
+         "Bmp4" # Oligo3
+            ),
+                    log_scale=F,
+                    label_height=15,
+                    max_width=25)
+
+
+plot
+
+#ggsave(plot,file="../analysis_output/mouse_violin_NN_plot.pdf",height=2,width=3, useDingbats=FALSE)
+```
+
+```{r}
+test <- FindMarkers(m.all, ident.1 = "Chrna3", ident.2 = c("Chrna2","Chrna1"))
+test$diff <- test$pct.1-test$pct.2 
+
+m <- markers[markers$cluster == "LGd",]
+m$diff <- m$pct.1-m$pct.2 
+
+```
+
+```{r violin Neuron, echo=F, fig.height=12, fig.width=5}
+allcl.sub <- allcl[allcl$class_label != "Non-Neuronal",]
+sampdat=data.frame(sample_name=allcl.sub$sample_name,t(as.matrix(datlist[[spec]][,allcl.sub$sample_name])))
+
+
+
+
+plot <- group_violin_plot(sampdat,allcl.sub,grouping="cluster",
+                    genes=c("Snap25", "Gad2",
+                       "Chrna6",# Chrna
+                       "Dscaml1","Styk1", # Chrna1
+                       "Pax7","Pde3a", # Chrna2
+                       "Alyref","Dapk3",# Chrna3
+                       "Pvalb", # GABA1
+                       "Spata20", # GABA2
+                       "Htr1a", # GABA3
+                       "Penk",# GABA4
+                       "Dlx5","Stc1",# GABA5
+                       "Rspo2",# GABA6
+                       "Slc17a6","Slc17a7", 
+                       "Neurod6", # LGv
+                       "Calb1","Gpr4",# LP
+                       "Scn4b","Adamts19"# LGd
+                     ),
+                    log_scale=F,
+                    label_height=8,
+                    max_width=25)
+
+
+plot
+
+#ggsave(plot,file="../analysis_output/mouse_violin_NEURON_plot.pdf",height=10,width=3, useDingbats=FALSE)
+```
+
+
+
+### UMAP plots
+```{r, eval=FALSE}
+
+temp=m.all
+dimval=19
+temp=RunUMAP(temp,reduction="pca",dims=1:dimval, verbose=FALSE)
+DimPlot(temp, reduction = "umap", group.by = "cluster_label",label=T)
+umap_all <- temp@reductions$umap@cell.embeddings
+
+temp=m.neuron
+dimval=25
+temp=RunUMAP(temp,reduction="pca",dims=1:dimval, verbose=FALSE)
+DimPlot(temp, reduction = "umap", group.by = "cluster_label",label=T)
+umap_neuron <- temp@reductions$umap@cell.embeddings
+
+temp=m.lgd
+dimval=27
+temp=RunUMAP(temp,reduction="pca",dims=1:dimval,verbose=FALSE)
+DimPlot(temp, reduction = "umap", group.by = "cluster_label",label=T)
+umap_lgd <- temp@reductions$umap@cell.embeddings
+
+
+```
+
+```{r, eval=FALSE}
+save(umap_all, umap_lgd, umap_neuron, file="../analysis_output/mouse_umap.rda")  
+```
+
+```{r, eval=FALSE}
+for (dimval in 5:30) {
+  temp=RunUMAP(temp,reduction="pca",dims=1:dimval, verbose=FALSE)
+  plot <- DimPlot(temp, reduction = "umap", group.by = "dissection_roi",label=T)
+  plot <- plot+ggtitle(dimval)
+  print(plot)
+   }
+```
+
+
+
+## plotting UMAPs
+
+
+### color palettes
+```{r plotting umaps}
+load("../analysis_output/mouse_umap.rda")
+
+clcol <- droplevels(unique(allcl[,c("cluster_id","cluster_label", "cluster_color")]))
+clcol <- clcol[order(clcol$cluster_id),]
+clcol <- setNames(clcol$cluster_color, clcol$cluster_label)
+
+
+rcol <- droplevels(unique(allcl[,c("dissection_roi","roi_color")]))
+rcol <- setNames(rcol$roi_color, rcol$dissection_roi)
+
+#roi_palette <- read.csv("../data/roi_palette.csv")
+#allcl$roi_ap_color <- roi_palette$roi_ap_color[match(allcl$roi_ap, roi_palette$roi)]
+
+
+
+```
+
+##plotting ALL clusters
+
+```{r}
+colnames(umap_all) = c("Lim1","Lim2")
+
+g1= plot_RD_meta(umap_all, factor(allcl[row.names(umap_all),] %>% pull(cluster_label),levels=names(clcol)), meta.col=clcol,alpha=0.5, cex=2)
+g1 = g1+  ggtitle("cluster") +
+    theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+    theme_void() + 
+    theme(legend.position="none") 
+
+
+g2= plot_RD_meta(umap_all, factor(allcl[row.names(umap_all),] %>% pull(dissection_roi),levels=names(rcol)), meta.col=rcol,alpha=0.5, cex=2)
+g2 = g2 + ggtitle("roi") +
+    theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+    theme_void() + 
+    theme(legend.position="none") 
+
+g3 <- g2 + facet_wrap(~meta, nrow=1)
+
+#ggsave(file=paste0(st,"mouse_umap.pdf"),gridExtra::marrangeGrob(list(g1,g2),nrow = 1, ncol=1), height=5,width=5)
+#ggsave(file=paste0(st,"mouse_umap.split.pdf"),g3, height=5,width=20)
+
+g1
+g2
+g3
+
+```
+
+
+
+## ploting neuronal clusters
+```{r}
+colnames(umap_neuron) = c("Lim1","Lim2")
+
+g4= plot_RD_meta(umap_neuron, factor(allcl[row.names(umap_neuron),] %>% pull(cluster_label),levels=names(clcol)), meta.col=clcol,alpha=0.5, cex=2)
+g4 = g4+  ggtitle("cluster") +
+    theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+    theme_void() + 
+    theme(legend.position="none") 
+
+
+g5= plot_RD_meta(umap_neuron, factor(allcl[row.names(umap_neuron),] %>% pull(dissection_roi),levels=names(rcol)), meta.col=rcol,alpha=0.5, cex=2)
+g5 = g5 + ggtitle("roi") +
+    theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+    theme_void() + 
+    theme(legend.position="none") 
+
+g6 <- g5 + facet_wrap(~meta, nrow=1)
+
+#ggsave(file=paste0(st,"mouse_umap.pdf"),gridExtra::marrangeGrob(list(g1,g5),nrow = 1, ncol=1), height=5,width=5)
+#ggsave(file=paste0(st,"mouse_umap.split.pdf"),g3, height=5,width=20)
+
+g4
+g5
+g6
+
+```
+
+
+
+
+## plotting LGN cluster
+
+
+```{r}
+
+colnames(umap_lgd) = c("Lim1","Lim2")
+g7= plot_RD_meta(umap_lgd, factor(allcl[row.names(umap_lgd),] %>% pull(cluster_label),levels=names(clcol)), meta.col=clcol,alpha=0.5, cex=2)
+g7 = g7+  ggtitle("cluster") +
+    theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+    theme_void() + 
+    theme(legend.position="none") 
+
+g8= plot_RD_meta(umap_lgd, factor(allcl[row.names(umap_lgd),] %>% pull(dissection_roi),levels=names(rcol)), meta.col=rcol,alpha=0.5, cex=2)
+g8 = g8 + ggtitle("roi") +
+    theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+    theme_void() + 
+    theme(legend.position="none") 
+
+g9 <- g8 + facet_wrap(~meta, nrow=1)
+
+g7
+g8
+g9
+```
+```{r}
+ggsave(file="../analysis_output/mouse_umap.pdf",gridExtra::marrangeGrob(list(g1,g2,g4,g5,g7,g8),nrow = 1, ncol=1), height=5,width=5)
+ggsave(file="../analysis_output/mouse_umap.split.pdf",gridExtra::marrangeGrob(list(g3,g6,g9),nrow = 1, ncol=1), height=5,width=20)
+```
+
+```{r}
+
+rd.dat = umap_lgd
+meta=factor(allcl[row.names(umap_lgd),] %>% pull(dissection_roi),levels=names(rcol))
+meta.col=rcol
+alpha.val=0.5
+cex=2
+
+rd.dat = as.data.frame(rd.dat)
+colnames(rd.dat)[1:2] = c("Dim1","Dim2")
+rd.dat$meta = meta
+
+rd.dat = droplevels(rd.dat)
+
+p=ggplot(rd.dat, aes(Dim1, Dim2)) + 
+    geom_point(aes(color=meta, shape=meta),size=cex) +
+    scale_color_manual(values=alpha(as.vector(meta.col[levels(rd.dat$meta)]),alpha.val)) +
+    scale_shape_manual(values = c( 16, 17)) 
+
+p=p+ggtitle("roi") +
+    theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+    theme_void() + 
+    theme(legend.position="none") 
+
+
+```
+
+```{r}
+ggsave(file="../analysis_output/mouse_umap_lgn_shape.pdf",p, height=5,width=5)
+```
+
+
+```{r}
+library(ggridges)
+umap <- data.frame(umap_lgd)
+umap <- tibble::rownames_to_column(umap, var="sample_name")
+meta <- m.lgd@meta.data
+umap <- umap %>% left_join(meta)
+```
+
+```{r}
+
+x_axis <- ggplot(umap, aes(x = Lim1, y = dissection_roi, fill=roi_color)) +   
+      geom_density_ridges(scale=10, aes(alpha=0.5), rel_min_height=0.01) + 
+      scale_fill_identity() +
+      #theme_ridges(grid = FALSE, center_axis_labels = TRUE) +
+      theme_void() +
+      theme(legend.position="none") 
+
+y_axis <- ggplot(umap, aes(x = Lim2, y = dissection_roi, fill=roi_color)) +   
+      geom_density_ridges(scale=10, aes(alpha=0.5), rel_min_height=0.01) + 
+      scale_fill_identity() +
+      #theme_ridges(grid = FALSE, center_axis_labels = FALSE) +
+      theme_void() +
+      theme(legend.position="none") 
+
+x_axis
+y_axis
+```
+
+```{r}
+ggsave(file="../analysis_output/mouse_lgd_umap_ridges.pdf",gridExtra::marrangeGrob(list(x_axis, y_axis),nrow = 1, ncol=1), height=2,width=5)
+
+```
+
+
+#### gene plot with other species greyed out
+```{r}
+select.genes = c("Pvalb","Necab1","Calb1","Scnn1a","Foxp2" )
+
+int_keepm=umap$sample_name
+
+
+norm.dat.m <- as.data.frame(t(as.matrix(datlist[["mouse"]][select.genes,int_keepm])))
+#norm.dat.m <- tibble::rownames_to_column(norm.dat.m, var="sample_name")
+
+
+```
+
+```{r}
+
+
+
+rd.dat = as.data.frame(umap_lgd)
+rownames(rd.dat) <- rd.dat$sample_name
+colnames(rd.dat)[1:2] = c("Dim1","Dim2")
+rd.dat = cbind(rd.dat,norm.dat.m)
+
+plots.m <- list()
+for(g in select.genes){
+  p=  ggplot() +
+        geom_point(data=rd.dat, aes(Dim1, Dim2,color=.data[[g]]),size=2, alpha=0.75)
+  p = p+ scale_color_gradient(low="gray60",high="red",limits=c(0, 400)) 
+  p = p + theme_void() + theme(legend.position="none")
+  p = p + coord_fixed(ratio=1)
+  p = p + ggtitle(g)
+  plots.m[[g]]= p
+  print(p)
+    }
+
+p
+
+
+```
+
+
+ 
+```{r}
+ggsave(file="../analysis_output/Mo_umap_genes_lgn2.pdf",gridExtra::marrangeGrob(plots.m,nrow = 1, ncol=1, top=NULL), height=5,width=5,useDingbats=FALSE)
+```
+
+
+# Barplot showing dissection ROI distribution among clusters
+```{r barplot setup}
+
+allcl$cluster_label <- factor(allcl$cluster_label, levels=c("Chrna1" , "Chrna2",  "Chrna3", "GABA1", "GABA2", "GABA3", "GABA4", "GABA5", "GABA6", "LGv","LP", "LGd",  "Oligo1" ,  "Oligo2"   ,"Oligo3")  )
+allcl$dissection_roi <- as.factor(allcl$dissection_roi)
+allcl$dissection_roi <- droplevels(allcl$dissection_roi)
+```
+```{r barplot plotting}
+
+propvals <- allcl %>% 
+          group_by(cluster_label, dissection_roi) %>% 
+          summarise(n = n()) %>%
+          mutate(freq = n / sum(n))
+
+p1 <- ggplot(propvals, aes(fill=dissection_roi, y=n, x=cluster_label)) + 
+    geom_bar(position="fill", stat="identity") +
+    #scale_fill_manual(values=rcol)
+    scale_fill_manual(values=as.vector(rcol[levels(allcl$dissection_roi)])) +
+    ylab("Fraction of cells") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+    theme(axis.title.x = element_blank())
+
+
+propvals <- allcl %>% 
+          filter(class_label != "Non-Neuronal") %>%
+          group_by(cluster_label, dissection_roi) %>% 
+          summarise(n = n()) %>%
+          mutate(freq = n / sum(n))
+
+p2 <- ggplot(propvals, aes(fill=dissection_roi, y=n, x=cluster_label)) + 
+    geom_bar(position="fill", stat="identity") +
+    #scale_fill_manual(values=rcol)
+    scale_fill_manual(values=as.vector(rcol[levels(allcl$dissection_roi)])) +
+    ylab("Fraction of cells") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+    theme(axis.title.x = element_blank())
+
+
+
+p1
+p2
+
+```
+```{r barplot save}
+
+ggsave(file="../analysis_output/mouse_roi_barplot.pdf", marrangeGrob(list(p1,p2),nrow = 1, ncol=1, top=NULL), height = 3, width = 4, useDingbats=FALSE)
+```
+
+####de genes heatmap dLGN###
+```{r}
+  
+
+require(feather)
+require(dplyr)
+require(WGCNA)
+require(gplots)
+require(edgeR)
+
+
+mdat <- as.matrix(m.lgd@assays[["RNA"]]@counts)
+class1=meta$sample_name[meta$dissection_roi == "dLGN - Core"]
+class2=meta$sample_name[meta$dissection_roi == "dLGN - Shell"]
+
+classvals=as.factor(rep(c(1,2),times=c(length(class1),length(class2))))
+startmat=cpm(mdat)
+
+e_design=model.matrix(~classvals)
+y2 = DGEList(counts=mdat)
+y2 = estimateDisp(y2, e_design)
+fit = glmQLFit(y2, e_design)
+qlf.2vs1 <- glmQLFTest(fit, coef=2)
+outval2=topTags(qlf.2vs1,n=nrow(startmat),p.value=1)
+outval2$table=outval2$table[intersect(rownames(outval2$table),rownames(startmat)),]
+mean1=apply(startmat[rownames(outval2$table),classvals==1],1,mean)
+mean2=apply(startmat[rownames(outval2$table),classvals==2],1,mean)
+frac1=rowSums(startmat[rownames(outval2$table),classvals==1]>0)/length(class1)
+frac2=rowSums(startmat[rownames(outval2$table),classvals==2]>0)/length(class2)
+outmat=cbind(outval2$table,mean1,mean2,frac1,frac2)
+
+suboutmat=outmat[outmat$FDR<0.001 & apply(outmat[,c("frac1","frac2")],1,max)>0.25,]
+suboutmat=suboutmat[-grep("Gm|LOC",rownames(suboutmat)),]
+
+keepgen1=rownames(suboutmat)[order(-suboutmat$logFC)[1:16]]
+keepgen2=rownames(suboutmat)[order(suboutmat$logFC)[1:16]]
+
+keepgen=c("Stxbp6","Phldb2","Tnc","Cdc42ep4","Il1rapl2","Drd1","Necab1","Rgs6","Mgat4c","Mbp","Adcy2","Angpt1","Fam19a1","Dcx","Tmem236","Scnn1a","Zfp385c","Proser2","G630055G22Rik","Wwtr1","Iyd","Bace2","Slc35f4","Acp5","Etl4","Fam65b","Lama2","Sec14l4","Enpep","Cped1")
+
+keepgen<-c(keepgen1,keepgen2, "Pvalb", "Calb1", "Necab1","Foxp2")
+
+submat <- outmat[keepgen,]
+submat <- submat[order(-submat$logFC),]
+
+keepgen1=rownames(submat)[order(-submat$logFC)[1:18]]
+keepgen2=rownames(submat)[order(submat$logFC)[1:18]]
+
+plotmat=startmat[c(keepgen1,keepgen2),]
+colvec=rep(c("#580077","#B000CC"),times=c(length(class1),length(class2)))
+breakvals=seq(from=-2,to=2,length.out=201)
+colnames(plotmat)=rep("",ncol(plotmat))
+
+pdf("../analysis_output/mouse_core_shell_de_genes.pdf",useDingbats=F, height=7, width=11)
+heatmap.2(log10(plotmat+1),breaks=breakvals,col=bluered(200),scale="row",trace='none',Rowv=F,Colv=F,ColSideColors=colvec)
+dev.off()
+```
+
+
+####de genes heatmap dLGN - UMAP###
+
+
+
+
+## identify genes correlated with umap1-axis for dLGN cluster
+```{r}
+lgd.plot <- plot_objects[["lgd"]]
+meta <- lgd.plot@meta.data
+keepcells=meta$sample_name[which(meta$cluster_label =="LGd")]
+coords=lgd.plot@reductions$umap@cell.embeddings[,1:2]
+coords <- coords[meta$sample_name,]
+
+require(Matrix)
+axis_genelists=list()
+
+### Mouse axis 1
+cells_axis1=coords[keepcells,1]
+genvals=t(cor(cells_axis1,as.matrix(t(lgd.plot@assays[["RNA"]]@data[,keepcells])),method="spearman"))
+axis.genes <- as.data.frame(genvals)
+colnames(axis.genes)[1] <- "Mo.axis1"
+axis_genelists[["mouse_axis1"]]=genvals
+
+### Mouse axis 2
+cells_axis2=coords[keepcells,2]
+genvals=t(cor(cells_axis2,as.matrix(t(lgd.plot@assays[["RNA"]]@data[,keepcells])),method="spearman"))
+axis.genes$"Mo.axis2" <- genvals
+axis_genelists[["mouse_axis2"]]=genvals
+```
+
+```{r, fig.height=8, fig.width=5}
+
+keepgenesplot <- axis.genes %>%
+        tibble::rownames_to_column('gene') %>%
+        filter_if(is.numeric, any_vars(. > 0.25 | .< -0.25))
+
+library(reshape)
+genesplot <- melt(keepgenesplot)
+genesplot$variable <- factor(genesplot$variable, levels=c("Mo.axis1", "Mo.axis2"))
+p.gene.cor <- ggplot(genesplot) + 
+      geom_tile(aes(y=reorder(gene, value,median, order=TRUE), x=variable, fill =value)) +
+      #scale_fill_gradient2(low = "midnightblue", mid = "white", high ="red", oob="squish")
+      scale_fill_gradient(low = "#132B43", high ="#56B1F7") #"#8accff"
+
+x <- ggplot_build(p.gene.cor)
+gene.order.plot <- x[["layout"]][["panel_params"]][[1]][["y.sec"]][["limits"]]
+
+genes.to.plot <- head(gene.order.plot, 30) 
+genes.to.plot2 <- tail(gene.order.plot, 30)
+extra <- c("Foxp2","Robo2", "Camk2a","Necab1","Calb2","Tnnt1")
+genes.to.plot <- append(genes.to.plot,append(extra ,genes.to.plot2))
+genesplot.s <- genesplot[genesplot$gene %in% genes.to.plot,]
+
+p.gene.cor <- ggplot(genesplot.s) + 
+      geom_tile(aes(y=reorder(gene, value,median, order=TRUE), x=variable, fill =value)) +
+      scale_fill_gradient(low = "#132B43", high ="#56B1F7") #"#8accff"
+
+p.gene.cor
+```
+```{r}
+
+ggsave(file= "../analysis_output/HMM_integrated_GL_heatmap_corr.axis.pdf", p.gene.cor, width=5, height=8, useDingbats=FALSE)
+```
+
+
+

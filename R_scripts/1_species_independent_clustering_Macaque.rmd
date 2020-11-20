@@ -1,0 +1,428 @@
+---
+title: 'Species independent clustering: Macaque'
+author: "Cy"
+date: "8/19/2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r load-libraries, echo=FALSE}
+library(dplyr)
+library(Seurat)
+library(SeuratWrappers)
+library(ggplot2)
+library(cowplot)
+library(scrattch.hicat)
+library(feather)
+library(Matrix)
+
+source("doublet.finder.r")
+source("hicat_modules.r")
+
+load("../int_data/collected_data_20200818.rda")
+
+```
+
+
+```{r select-gene-list }
+spec="macaque"
+
+
+if (spec=="macaque") {
+  orthos=read.csv("../data/ortholog_table_20191122.csv",as.is=T)
+  nonlocgenes=orthos$rhesus_symbol[intersect(grep("^LOC",orthos$human_symbol,invert=T),grep("^LOC",orthos$rhesus_symbol))]
+  keepgen=setdiff(rownames(datlist[[spec]]),setdiff(grep("^LOC|^MT-|^RPL|^RPS|^SNAR|^CT45|^MIR|^MTND|^TRNA",rownames(datlist[[spec]]),val=T),nonlocgenes))
+  datlist[[spec]]=datlist[[spec]][keepgen,]
+  datlist[[spec]]@x=datlist[[spec]]@x/rep.int(Matrix::colSums(datlist[[spec]]),diff(datlist[[spec]]@p))*10^6
+} else {
+  if (spec=="human") {
+    keepgen=grep("^LOC|^MT-|^RPL|^RPS|^SNAR|^CT45|^MIR|^MTND|[0-9]P$|-AS|-PS|DUX4L",rownames(datlist[[spec]]),val=T,invert=T)
+    keepdons=which(metalist$human$external_donor_name_label %in% c("H200.1023","H200.1025","H200.1030"))
+    datlist[[spec]]=datlist[[spec]][keepgen,keepdons]
+    datlist[[spec]]@x=datlist[[spec]]@x/rep.int(Matrix::colSums(datlist[[spec]]),diff(datlist[[spec]]@p))*10^6
+  } else {
+    keepgen=grep("^LOC|^mt-|^Rpl|^Rps",rownames(datlist[[spec]]),val=T,invert=T)
+  }
+}
+```
+
+
+### calculate doublet scores ###
+```{r doublet-score}
+alldoublet <- doubletFinder(datlist[[spec]], select.genes=keepgen, 
+                            proportion.artificial = 0.2, plot=T)
+doublet.scores <- alldoublet[[1]] 
+save(doublet.scores,file=paste0("../analysis_output/doublet.score_", spec,".rda"))
+
+
+### inspect doublet.score threshold ###
+alldoublet[[3]]
+ggsave(alldoublet[[3]], file=paste0("../analysis_output/doublet.score_",spec,".pdf"), height = 4, width = 5)
+
+keepcells1=intersect(names(doublet.scores)[doublet.scores<0.25],colnames(datlist[[spec]]))
+#keepcells1 <- intersect(keepcells1, metadat$exp_component_name[metadat$Genes.Detected>2000])
+
+```
+
+#clustering of cells from all 3 Macaque donors
+
+_____________________________________________________
+
+The dataset contains two different species of Macaque, M. Nemestrina (2 donors) and M. Fascicularis
+
+This is an initial run to determine if there are any batch/donor effects to take into account
+
+```{r}
+m.int <- CreateSeuratObject(counts = datlist[[spec]][keepgen,keepcells1], meta.data = metalist[[spec]][keepcells1,])
+m.int <- NormalizeData(object = m.int)
+
+m.int <- ScaleData(object = m.int, verbose = FALSE)
+
+m.int <- FindVariableFeatures(object = m.int, selection.method = "vst", 
+                              nfeatures = 3000) #2000 for mouse and macaque
+m.int <- RunPCA(object = m.int, npcs = 30, verbose = FALSE)
+set.seed(0)
+m.int <- RunTSNE(object = m.int, reduction = "pca", dims = 1:30)
+m.int <- RunUMAP(object = m.int, reduction = "pca", dims = 1:30)
+m.int <- FindNeighbors(object = m.int, k.param = 8,dims=1:30)
+m.int <- FindClusters(object = m.int, resolution = 0.2) ##0.2 for macaque,0.4 for mouse
+```
+```{r m.int plotting all}
+
+DimPlot(m.int,reduction = "umap",label = TRUE)
+DimPlot(m.int,reduction = "umap",group.by="external_donor_name",label = TRUE)
+FeaturePlot(m.int,features=c("GAD2","SLC17A6","EBF1", "FOXP2"))
+plot<- DotPlot(m.int,features=c("GAD2","SLC17A6","SNAP25","AQP4","AIF1","OLIG2","OPALIN","LAMP5", "PRKCG", "EBF1", "FOXP2"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+```
+
+clustering of M. Nemestrina cells only
+
+```{r}
+metadat <- metalist[[spec]]
+keepcells2 <- intersect(keepcells1, metadat$exp_component_name[metadat$species=="M. fascicularis"])
+keepcells3 <- intersect(keepcells1, metadat$exp_component_name[metadat$species!="M. fascicularis"])
+
+
+m.int <- CreateSeuratObject(counts = datlist[[spec]][keepgen,keepcells3], meta.data = metalist[[spec]][keepcells3,])
+m.int <- NormalizeData(object = m.int)
+
+m.int <- ScaleData(object = m.int, verbose = FALSE)
+
+m.int <- FindVariableFeatures(object = m.int, selection.method = "vst", 
+                              nfeatures = 3000) #2000 for mouse and macaque
+m.int <- RunPCA(object = m.int, npcs = 30, verbose = FALSE)
+set.seed(0)
+m.int <- RunTSNE(object = m.int, reduction = "pca", dims = 1:30)
+m.int <- RunUMAP(object = m.int, reduction = "pca", dims = 1:30)
+m.int <- FindNeighbors(object = m.int, k.param = 8,dims=1:30)
+m.int <- FindClusters(object = m.int, resolution = 0.4) ##0.2 for macaque,0.4 for mouse
+```
+```{r m.int plotting}
+
+DimPlot(m.int,reduction = "umap",label = TRUE)
+DimPlot(m.int,reduction = "umap",group.by="external_donor_name",label = TRUE)
+FeaturePlot(m.int,features=c("GAD2","SLC17A6","EBF1", "FOXP2"))
+plot<- DotPlot(m.int,features=c("GAD2","SLC17A6","SNAP25","AQP4","AIF1","OLIG2","OPALIN","LAMP5", "PRKCG", "EBF1", "FOXP2"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+```
+
+the three different donors do not integrate well according to the  clustering result. Therefore, we will apply a batch correction to align the data across donors
+
+
+#clustering of cells from all 3 Macaque donors with batch correction
+
+_____________________________________________________
+
+
+### correction of donor effect using fastMNN
+Mutual nearest neighbors (MNNs) are defined as pairs of cells - one from each batch - that are within each other’s set of k nearest neighbors. The idea is that MNN pairs across batches refer to the same cell type, assuming that the batch effect is orthogonal to the biological subspace (Haghverdi et al. 2018). Once MNN pairs are identified, the difference between the paired cells is used to infer the magnitude and direction of the batch effect. It is then straightforward to remove the batch effect and obtain a set of corrected expression values.
+
+The fastMNN() function performs a principal components analysis (PCA) on the HVGs to obtain a low-dimensional representation of the input data. MNN identification and correction is performed in this low-dimensional space, which offers some advantages with respect to speed and denoising.
+https://bioconductor.org/packages/release/bioc/vignettes/batchelor/inst/doc/correction.html
+
+```{r, echo=FALSE}
+m.int <- CreateSeuratObject(counts = datlist[[spec]][keepgen,keepcells1], meta.data = metalist[[spec]][keepcells1,])
+m.int <- NormalizeData(object = m.int)
+m.int <- FindVariableFeatures(m.int, selection.method = "vst", 
+                              nfeatures = 3000)
+m.int <- RunFastMNN(object.list = SplitObject(m.int, split.by = "external_donor_name"))
+m.int <- RunUMAP(m.int, reduction = "mnn", dims = 1:30)
+m.int <- FindNeighbors(m.int, reduction = "mnn", dims = 1:30)
+m.int <- FindClusters(m.int, resolution = 0.4)
+```
+
+
+```{r}
+#DimPlot(m.int, group.by = c("external_donor_name", "ident", "roi"), ncol = 3)
+DimPlot(m.int, group.by = "external_donor_name")
+DimPlot(m.int, group.by = "ident")
+DimPlot(m.int, group.by = "roi")
+
+FeaturePlot(m.int,features=c("GAD2","SLC17A6","EBF1", "FOXP2"))
+plot<- DotPlot(m.int,features=c("GAD2","SLC17A6","SNAP25","AQP4","AIF1","OLIG2","OPALIN","LAMP5", "PRKCG", "EBF1", "FOXP2"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+VlnPlot(object = m.int, features = c("Genes.Detected", "total_reads"))
+```
+
+```{r}
+tab <- table(paste0(m.int@meta.data$external_donor_name,m.int@meta.data$roi),m.int@active.ident)
+rbind(tab, Total = colSums(tab))
+```
+GABAergic == clusters 2, 7, 8
+
+Glutamatergic == clusters 0, 1, 3, 4, 6
+
+Cluster 5 is a low quality cluster. Gene detection and total reads are lower than other clusters, no specific markers.
+
+## GABAergic neurons 
+Subcluster GABAergic neurons only. Clusters are selected by high expression of GAD2, low expression of SLC17a6
+```{r clustering GABAergic neurons}
+keepcells=names(m.int@active.ident)[m.int@active.ident %in% c(2,7,8)]
+
+m.int2 <- CreateSeuratObject(counts = datlist[[spec]][keepgen,keepcells], meta.data = metalist[[spec]][keepcells,])
+m.int2 <- NormalizeData(object = m.int2)
+m.int2 <- FindVariableFeatures(m.int2, selection.method = "vst", 
+                              nfeatures = 3000)
+m.int2 <- RunFastMNN(object.list = SplitObject(m.int2, split.by = "external_donor_name"))
+m.int2 <- RunUMAP(m.int2, reduction = "mnn", dims = 1:30)
+m.int2 <- FindNeighbors(m.int2, reduction = "mnn", dims = 1:30)
+m.int2 <- FindClusters(m.int2, resolution = 0.2)
+
+```
+
+```{r plotting GABAergic neurons}
+#DimPlot(m.int, group.by = c("external_donor_name", "ident", "roi"), ncol = 3)
+DimPlot(m.int2, group.by = "external_donor_name")
+DimPlot(m.int2, group.by = "ident")
+DimPlot(m.int2, group.by = "roi")
+
+FeaturePlot(m.int2,features=c("GAD2","LAMP5","PVALB", "FBN2"))
+plot <- DotPlot(m.int2,features=c("GAD2","SLC17A6","SNAP25","AQP4","AIF1","OLIG2","OPALIN","LAMP5", "PRKCG", "EBF1", "FOXP2"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+plot2 <- DotPlot(m.int2,features=c("GAD2","LAMP5","DLX1","PVALB","KRT80","DSEL","VGF","GBP3","FBN2"))
+plot2 + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+VlnPlot(object = m.int2, features = c("Genes.Detected", "total_reads"))
+
+```
+
+Clusters 0 and 1 seem very similar based on select marker expression. Identify cluster markers to determine whether to merge or not.
+
+```{r markers GABAergic neurons 0 and 1}
+#cluster.markers <- FindAllMarkers(m.int2)
+cluster0.markers <- FindMarkers(m.int2, ident.1 = 0, min.pct = 0.25, verbose=F)
+head(cluster0.markers, n = 10)
+cluster1.markers <- FindMarkers(m.int2, ident.1 = 1, min.pct = 0.25, verbose=F)
+head(cluster1.markers, n = 10)
+
+```
+
+
+No convincing upregulated markers between cluster 0 and cluster 1. Merge together.
+
+```{r merge gaba}
+m.int2@active.ident[m.int2@active.ident==0]=1
+```
+
+```{r plotting GABAergic neurons 2}
+#DimPlot(m.int, group.by = c("external_donor_name", "ident", "roi"), ncol = 3)
+DimPlot(m.int2, group.by = "external_donor_name")
+DimPlot(m.int2, group.by = "ident")
+DimPlot(m.int2, group.by = "roi")
+
+FeaturePlot(m.int2,features=c("GAD2","LAMP5","PVALB", "FOXP2"))
+plot <- DotPlot(m.int2,features=c("GAD2","SLC17A6","SNAP25","PRKCG","SGCD","CASQ2","IL15RA","KCNH3","SYNDIG1L","EBF1","FOXP2","LHX9","CD5","BTNL9", "DSEL"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+plot2 <- DotPlot(m.int2,features=c("GAD2","LAMP5","DLX1","PVALB","KRT80","DSEL","VGF","GBP3","FBN2"))
+plot2 + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+VlnPlot(object = m.int2, features = c("Genes.Detected", "total_reads"))
+
+```
+
+
+
+## Glutamatergic neurons
+Subcluster glutamatergic neurons only. Clusters are selected based on low GAD2 expression, high SLC17A6 expression
+Glutamatergic == clusters 0, 1, 3, 4, 6
+
+```{r clustering glutamatergic neurons}
+keepcells=names(m.int@active.ident)[m.int@active.ident %in% c(0,1,3,4,6)]
+
+m.int3 <- CreateSeuratObject(counts = datlist[[spec]][keepgen,keepcells], meta.data = metalist[[spec]][keepcells,])
+m.int3 <- NormalizeData(object = m.int3)
+m.int3 <- FindVariableFeatures(m.int3, selection.method = "vst", 
+                              nfeatures = 3000)
+m.int3 <- RunFastMNN(object.list = SplitObject(m.int3, split.by = "external_donor_name"))
+m.int3 <- RunUMAP(m.int3, reduction = "mnn", dims = 1:30)
+m.int3 <- FindNeighbors(m.int3, reduction = "mnn", dims = 1:30)
+m.int3 <- FindClusters(m.int3, resolution = 0.4)
+```
+
+
+```{r plotting glutamatergic neurons}
+#DimPlot(m.int, group.by = c("external_donor_name", "ident", "roi"), ncol = 3)
+DimPlot(m.int3, group.by = "external_donor_name")
+DimPlot(m.int3, group.by = "ident")
+DimPlot(m.int3, group.by = "roi")
+
+
+plot <- DotPlot(m.int3,features=c("GAD2","SLC17A6","SNAP25","AQP4","AIF1","OLIG2","OPALIN","LAMP5", "PRKCG", "EBF1", "FOXP2"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+plot <- DotPlot(m.int3,features=c("GAD2","SLC17A6","SNAP25","PRKCG","SGCD","CASQ2","IL15RA","KCNH3","SYNDIG1L","EBF1","FOXP2","LHX9","CD5","BTNL9", "DSEL"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+plot2 <- DotPlot(m.int3,features=c("GAD2","SLC17A6","SNAP25","PRKCG","SGCD","CASQ2","IL15RA","KCNH3","SYNDIG1L","EBF1","FOXP2","LHX9","CD5","BTNL9", "DSEL"))
+
+VlnPlot(object = m.int3, features = c("Genes.Detected", "total_reads"))
+
+```
+
+
+```{r Vlnplot glutamatergic neurons, fig.height=10}
+VlnPlot(m.int3, features = c("SNAP25","TCF7L2","PRKCG","CAMK2A","CASQ2", "FOXP2","ROBO2","IL15RA", "EBF1","FGF11", "GRIK3","DAB2", "PLPP4","BTNL9","DSEL","PCP4","SPP1", "NEFH", "NEFL"), assay = "RNA", slot = "data", pt.size = 0.05)
+
+FeaturePlot(m.int3,features=c("SLC17A6","FOXP2","EBF1","PRKCG", "GRIK3","DAB2", "CASQ2"))
+
+table(m.int3@meta.data$external_donor_name,m.int3@active.ident)
+
+```
+
+cluster 0: Parvo (FOXP2, IL15RA)
+
+cluster 1: Magno (EBF1, IL15RA, FGF11)
+
+cluster 2: Pulv (DAB2, GRIK3, PLPP4)
+
+cluster 3: Konio (PRKCG, CAMK2A, CASQ2)
+
+cluster 4: Konio (PRKCG, CAMK2A, CASQ2,DAB2)
+
+
+```{r}
+#cluster.markers <- FindAllMarkers(m.int2)
+cluster0.markers <- FindMarkers(m.int3, ident.1 = 0, min.pct = 0.25, verbose=F)
+head(cluster0.markers, n = 10)
+cluster1.markers <- FindMarkers(m.int3, ident.1 = 1, min.pct = 0.25, verbose=F)
+head(cluster1.markers, n = 10)
+cluster2.markers <- FindMarkers(m.int3, ident.1 = 2, min.pct = 0.25, verbose=F)
+head(cluster2.markers, n = 10)
+cluster3.markers <- FindMarkers(m.int3, ident.1 = 3, min.pct = 0.25, verbose=F)
+head(cluster3.markers, n = 10)
+cluster4.markers <- FindMarkers(m.int3, ident.1 = 4, min.pct = 0.25, verbose=F)
+head(cluster4.markers, n = 10)
+```
+
+
+## konio/LP
+
+```{r clustering Konio_LP neurons}
+keepcells=names(m.int@active.ident)[m.int3@active.ident %in% c(2,3,4)]
+
+m.int4 <- CreateSeuratObject(counts = datlist[[spec]][keepgen,keepcells], meta.data = metalist[[spec]][keepcells,])
+m.int4 <- NormalizeData(object = m.int4)
+m.int4 <- FindVariableFeatures(m.int4, selection.method = "vst", 
+                              nfeatures = 3000)
+m.int4 <- RunFastMNN(object.list = SplitObject(m.int4, split.by = "external_donor_name"))
+m.int4 <- RunUMAP(m.int4, reduction = "mnn", dims = 1:30)
+m.int4 <- FindNeighbors(m.int4, reduction = "mnn", dims = 1:30)
+m.int4 <- FindClusters(m.int4, resolution = 0.4)
+```
+
+
+
+```{r plotting Konio_LP neurons}
+#DimPlot(m.int, group.by = c("external_donor_name", "ident", "roi"), ncol = 3)
+DimPlot(m.int4, group.by = "external_donor_name")
+DimPlot(m.int4, group.by = "ident")
+DimPlot(m.int4, group.by = "roi")
+
+
+plot <- DotPlot(m.int4,features=c("GAD2","SLC17A6","SNAP25","AQP4","AIF1","OLIG2","OPALIN","LAMP5", "PRKCG", "EBF1", "FOXP2"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+plot <- DotPlot(m.int4,features=c("GAD2","SLC17A6","SNAP25","PRKCG","SGCD","CASQ2","IL15RA","KCNH3","SYNDIG1L","EBF1","FOXP2","LHX9","CD5","BTNL9", "DSEL"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+plot2 <- DotPlot(m.int4,features=c("GAD2","SLC17A6","SNAP25","PRKCG","SGCD","CASQ2","IL15RA","KCNH3","SYNDIG1L","EBF1","FOXP2","LHX9","CD5","BTNL9", "DSEL"))
+
+VlnPlot(object = m.int4, features = c("Genes.Detected", "total_reads"))
+
+```
+
+```{r Vlnplot Konio_LP neurons, fig.height=10}
+VlnPlot(m.int4, features = c("SNAP25","TCF7L2","PRKCG","CAMK2A","CASQ2", "FOXP2","ROBO2","IL15RA", "EBF1","FGF11", "GRIK3","DAB2", "PLPP4","BTNL9","DSEL","PCP4","SPP1", "NEFH", "NEFL"), assay = "RNA", slot = "data", pt.size = 0.05)
+
+FeaturePlot(m.int4,features=c("SLC17A6","FOXP2","EBF1","PRKCG", "GRIK3","DAB2", "CASQ2"))
+
+table(m.int4@meta.data$external_donor_name,m.int4@active.ident)
+
+```
+
+## Magno/Parvo
+
+```{r clustering MP neurons}
+keepcells=names(m.int@active.ident)[m.int3@active.ident %in% c(0,1)]
+
+m.int5 <- CreateSeuratObject(counts = datlist[[spec]][keepgen,keepcells], meta.data = metalist[[spec]][keepcells,])
+m.int5 <- NormalizeData(object = m.int5)
+m.int5 <- FindVariableFeatures(m.int5, selection.method = "vst", 
+                              nfeatures = 3000)
+m.int5 <- RunFastMNN(object.list = SplitObject(m.int5, split.by = "external_donor_name"))
+m.int5 <- RunUMAP(m.int5, reduction = "mnn", dims = 1:30)
+m.int5 <- FindNeighbors(m.int5, reduction = "mnn", dims = 1:30)
+m.int5 <- FindClusters(m.int5, resolution = 0.4)
+```
+
+
+
+```{r plotting MP neurons}
+#DimPlot(m.int, group.by = c("external_donor_name", "ident", "roi"), ncol = 3)
+DimPlot(m.int5, group.by = "external_donor_name")
+DimPlot(m.int5, group.by = "ident")
+DimPlot(m.int5, group.by = "roi")
+
+
+plot <- DotPlot(m.int5,features=c("GAD2","SLC17A6","SNAP25","AQP4","AIF1","OLIG2","OPALIN","LAMP5", "PRKCG", "EBF1", "FOXP2"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+plot <- DotPlot(m.int5,features=c("GAD2","SLC17A6","SNAP25","PRKCG","SGCD","CASQ2","IL15RA","KCNH3","SYNDIG1L","EBF1","FOXP2","LHX9","CD5","BTNL9", "DSEL"))
+plot + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+plot2 <- DotPlot(m.int5,features=c("GAD2","SLC17A6","SNAP25","PRKCG","SGCD","CASQ2","IL15RA","KCNH3","SYNDIG1L","EBF1","FOXP2","LHX9","CD5","BTNL9", "DSEL"))
+
+VlnPlot(object = m.int5, features = c("Genes.Detected", "total_reads"))
+
+```
+
+
+
+```{r Vlnplot MP neurons, fig.height=10}
+VlnPlot(m.int5, features = c("SNAP25","TCF7L2","PRKCG","CAMK2A","CASQ2", "FOXP2","ROBO2","IL15RA", "EBF1","FGF11", "GRIK3","DAB2", "PLPP4","BTNL9","DSEL","PCP4","SPP1", "NEFH", "NEFL"), assay = "RNA", slot = "data", pt.size = 0.05)
+
+FeaturePlot(m.int5,features=c("SLC17A6","FOXP2","EBF1","PRKCG", "GRIK3","DAB2", "CASQ2"))
+
+table(m.int5@meta.data$external_donor_name,m.int5@active.ident)
+
+```
+
+
+```{r, echo=FALSE}
+save(m.int,m.int2,m.int3,m.int4, m.int5, file="../int_data/Clustering_Macaque.rda")
+```
+
+
+
+
+
+
+
+
+
+

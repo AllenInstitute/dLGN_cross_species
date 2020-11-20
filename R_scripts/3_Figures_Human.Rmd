@@ -1,0 +1,602 @@
+---
+title: "3_Figures_Human"
+author: "Cy"
+date: "8/31/2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+
+
+```{r workspace}
+
+library(dplyr)
+library(Seurat)
+library(ggplot2)
+library(cowplot)
+library(scrattch.hicat)
+library(feather)
+require(Matrix)
+require(scrattch.vis)
+#library(SeuratWrappers)
+library(dendextend)
+library(gridExtra)
+source("../R_scripts/hicat_modules.r")
+```
+
+```{r}
+load("../int_data/collected_data_20200818.rda")
+load("../int_data/human_plotobjects.rda")
+load("../int_data/human_allcl.rda")
+
+allcl <- allcl[allcl$class_label != "Low Quality",]
+rownames(allcl) <- allcl$sample_name
+```
+
+```{r}
+pdf("../analysis_output/human_dendrograms.pdf")
+dends <- c("all", "neuron")
+for (nam in dends){
+  temp=plot_objects[[nam]]
+  meanvals=matrix(0,ncol=20,nrow=length(unique(allcl$cluster_label[allcl$sample_name %in% temp$sample_name])))
+  rownames(meanvals)=unique(allcl$cluster_label[allcl$sample_name %in% temp$sample_name])[order(unique(allcl$cluster_id[allcl$sample_name %in% temp$sample_name]))]
+    for (ii in rownames(meanvals)) {
+    for (jj in 1:ncol(meanvals)) {
+        meanvals[ii,jj]=mean(temp@reductions$pca@cell.embeddings[allcl$sample_name[allcl$cluster_label==ii],jj])
+    }
+  }
+    distmat=dist((meanvals))
+    dend=as.dendrogram(hclust(distmat,method="ward.D2"))
+    if(nam == "neuron") {
+        x <- allcl %>% filter(class_label != "Non-Neuronal") %>% group_by(cluster_label, cluster_id) %>% summarise(n=n())
+        order <- x$cluster_label[order(x$cluster_id)]
+        dend=dend %>% rotate(order)
+    } else { 
+        x <- allcl %>%  group_by(cluster_label, cluster_id) %>% summarise(n=n())
+        order <- x$cluster_label[order(x$cluster_id)]
+        #dend=dend %>% rotate(order)
+        dend=dend %>% rotate(c("GABA1","GABA2", "GABA3","K1","K2","MP","Micro","Astro","Oligo","OPC"))
+
+    }
+    plot(dend)
+
+}
+
+#dev.off()
+```
+
+
+# Violin plot prep
+```{r}
+spec="human"
+keepgen=grep("^LOC|^MT-|^RPL|^RPS|^SNAR|^CT45|^MIR|^MTND|[0-9]P$|-AS|-PS|DUX4L",rownames(datlist[[spec]]),val=T,invert=T)
+keepdons=which(metalist$human$external_donor_name_label %in% c("H200.1023","H200.1025","H200.1030"))
+datlist[[spec]]=datlist[[spec]][keepgen,keepdons]
+datlist[[spec]]@x=datlist[[spec]]@x/rep.int(Matrix::colSums(datlist[[spec]]),diff(datlist[[spec]]@p))*10^6
+
+m.all <- plot_objects[["all"]]
+Idents(m.all) <- "cluster_label"
+m.all@active.ident <- factor(m.all@active.ident, levels=c("GABA1","GABA2", "GABA3","K1","K2","MP","Micro","Astro","Oligo","OPC" ))
+
+m.mp <- plot_objects[["mp"]]
+Idents(m.mp) <- "cluster_label"
+
+m.neuron <- plot_objects[["neuron"]]
+Idents(m.neuron) <- "cluster_label"
+
+m.mp_n <- plot_objects[["mp_n"]]
+Idents(m.mp_n) <- "cluster_label"
+```
+
+
+
+
+```{r, echo=T}
+
+genes<-c("SNAP25","GAD2","SLC17A6", #pan
+          "ID2","LAMP5","NXPH2", #GABA1
+          "CXCL12","OSBPL11","HGF", #GABA2
+          "GNAT3","RNA5SP118","PLEKHH2",  #GABA3
+          "KRT80","ADAMTSL4", #GABA4
+          "BTNL9", #MP
+          "PRKCG","CALB1","CASQ2", "CAMK2A", "PENK",#K1
+          "SIPA1", #K2
+  		    "MBP","GFAP")
+  
+plot2 <- DotPlot(m.all,features=genes)
+plot2 + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) 
+```
+# reorder clusters
+
+                                     
+                                     
+```{r violin ALL, echo=F, quietly=T, fig.height=12, fig.width=5}
+sampdat=data.frame(sample_name=allcl$sample_name,t(as.matrix(datlist[[spec]][,allcl$sample_name])))
+
+plot <- group_violin_plot(sampdat,allcl,grouping="cluster",
+                    genes=c("SNAP25","GAD2","SLC17A6", #pan
+                            "LAMP5","NXPH2", #GABA1
+                            "CNR1","TSPAN12",
+                            "KRT80","ADAMTSL4", #GABA2
+                            "HGF", "PLEKHH2","NPY",#GABA3
+                            "BCHE","GRB14",
+                            "SIPA1","RDM1" , #K1
+                            "PRKCG","CALB1","CASQ2", "CAMK2A", "PENK",#K2
+                            "SLC24A3","TSHZ2", "ITGA8","BTNL9",#MP
+                            "AIF1","C1QA" ,
+                            "GFAP", "AQP4",
+                            "MBP","MAG","ERMN","KLK6",
+                            "OLIG1","PDGFRA", "VCAN"),
+                    log_scale=F,
+                    label_height=15,
+                    max_width=25)
+
+
+plot
+
+#ggsave(plot,file="analysis_output/human_violin_ALL_plot_new.pdf",height=7,width=2, useDingbats=FALSE)
+```
+
+                                   
+```{r violin NN, echo=F, quietly=T, fig.height=6, fig.width=5}
+sampdat=data.frame(sample_name=allcl$sample_name,t(as.matrix(datlist[[spec]][,allcl$sample_name])))
+
+plot <- group_violin_plot(sampdat,allcl,grouping="cluster",
+                    genes=c("AIF1","C1QA" ,
+                            "GFAP", "AQP4",
+                            "MBP","MAG","ERMN","KLK6",
+                            "OLIG1","PDGFRA", "VCAN"),
+                    log_scale=F,
+                    label_height=15,
+                    max_width=25)
+
+
+plot
+
+#ggsave(plot,file="../analysis_output/human_violin_NN_plot.pdf",height=4,width=3, useDingbats=FALSE)
+```
+
+
+```{r violin Neuron, echo=F, fig.height=12, fig.width=5}
+allcl.sub <- allcl[allcl$class_label != "Non-Neuronal",]
+sampdat=data.frame(sample_name=allcl.sub$sample_name,t(as.matrix(datlist[[spec]][,allcl.sub$sample_name])))
+
+genes <- c("SNAP25","GAD2","SLC17A6", #pan
+                            "LAMP5","NXPH2", #GABA1
+                            "CNR1","TSPAN12",
+                            "KRT80","ADAMTSL4", #GABA2
+                            "HGF", "PLEKHH2","NPY",#GABA3
+                            "RDM1" , "BCHE",#K1
+                            "PRKCG","CALB1","CASQ2", "CAMK2A", "PENK",#K2
+                            "SLC24A3","PVALB","TSHZ2", "ITGA8","BTNL9")
+
+plot <- group_violin_plot(sampdat,allcl.sub,grouping="cluster",
+                    genes=genes,
+                    log_scale=F,
+                    label_height=15,
+                    max_width=25)
+
+
+plot
+
+#ggsave(plot,file="../analysis_output/human_violin_NEURON_plot_new.pdf",height=6.8,width=2, useDingbats=FALSE)
+```
+
+### UMAP plots
+```{r, eval=FALSE}
+
+temp=m.all
+dimval=19
+temp=RunUMAP(temp,reduction="pca",dims=1:dimval, verbose=FALSE)
+DimPlot(temp, reduction = "umap", group.by = "cluster_label",label=T)
+umap_all <- temp@reductions$umap@cell.embeddings
+
+temp=m.neuron
+dimval=15
+temp=RunUMAP(temp,reduction="pca",dims=1:dimval, verbose=FALSE)
+DimPlot(temp, reduction = "umap", group.by = "cluster_label",label=T)
+umap_neuron <- temp@reductions$umap@cell.embeddings
+
+temp=m.mp
+dimval=16
+temp=RunUMAP(temp,reduction="pca",dims=1:dimval,verbose=FALSE)
+DimPlot(temp, reduction = "umap", group.by = "cluster_label",label=T)
+umap_mp <- temp@reductions$umap@cell.embeddings
+
+temp=plot_objects[["mp_n"]]
+dimval=16
+temp=RunUMAP(temp,reduction="pca",dims=1:dimval,verbose=FALSE)
+DimPlot(temp, reduction = "umap", group.by = "cluster_label",label=T)
+umap_mp_n<- temp@reductions$umap@cell.embeddings
+```
+
+```{r, eval=FALSE}
+save(umap_all, umap_mp, umap_neuron, umap_mp_n, file="../analysis_output/human_umap.rda")  
+```
+
+```{r, eval=FALSE}
+for (dimval in 5:30) {
+  temp=RunUMAP(temp,reduction="pca",dims=1:dimval, verbose=FALSE)
+  plot <- DimPlot(temp, reduction = "umap", group.by = "donor",label=T)
+  plot <- plot+ggtitle(dimval)
+  print(plot)
+   }
+```
+
+
+## plotting UMAPs
+
+
+### color palettes
+```{r plotting umaps}
+load("../analysis_output/human_umap.rda")
+
+clcol <- droplevels(unique(allcl[,c("cluster_id","cluster_label", "cluster_color")]))
+clcol <- clcol[order(clcol$cluster_id),]
+clcol <- setNames(clcol$cluster_color, clcol$cluster_label)
+
+donor_palette <- read.csv("../data/donor_palette.csv")
+
+donorcol <- unique(donor_palette[,c("donor","donor_color","species")])
+donorcol <- setNames(donorcol$donor_color[donorcol$species=="Human"],donorcol$donor[donorcol$species=="Human"])
+
+rcol <- droplevels(unique(allcl[,c("roi","roi_color")]))
+rcol <- setNames(rcol$roi_color, rcol$roi)
+
+#roi_palette <- read.csv("../data/roi_palette.csv")
+#allcl$roi_ap_color <- roi_palette$roi_ap_color[match(allcl$roi_ap, roi_palette$roi)]
+
+roi_apcol <- droplevels(unique(allcl[,c("roi_ap","roi_ap_color")]))
+roi_apcol <- setNames(roi_apcol$roi_ap_color, roi_apcol$roi_ap)
+
+
+```
+
+### ALL data labeled with ROI, Donor, Cluster
+```{r}
+colnames(umap_all) = c("Lim1","Lim2")
+
+g1 <- plot_RD_meta(umap_all, factor(allcl[row.names(umap_all),] %>% pull(cluster_label),levels=names(clcol)), meta.col=clcol,alpha=0.5, cex=1.5)
+g1 <- g1+	ggtitle("cluster") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+g2= plot_RD_meta(umap_all, factor(allcl[row.names(umap_all),] %>% pull(donor),levels=names(donorcol)), meta.col=donorcol,alpha=0.5, cex=2)
+g2 = g2 + ggtitle("donor") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+g3 <- g2 + facet_wrap(~meta)
+
+g2[["data"]]$roi <- allcl$roi
+g4 <- g2 + facet_wrap(~roi)
+
+
+g5 <- plot_RD_meta(umap_all, factor(allcl[row.names(umap_all),] %>% pull(roi),levels=names(rcol)), meta.col=rcol,alpha=0.5, cex=1.5)
+g5 <- g5 + ggtitle("roi") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+g6 <- g5 + facet_wrap(~meta)
+
+g5[["data"]]$donor <- allcl$donor
+g7 <- g5 + facet_wrap(~donor)
+
+
+g1
+g2
+g3
+g4
+g5
+g6
+g7
+
+```
+
+```{r, eval=FALSE}
+ggsave(file="../analysis_output/human_umap_all.pdf",marrangeGrob(list(g1,g2,g5),nrow = 1, ncol=1, top=NULL), height=4,width=4)
+
+ggsave(file="../analysis_output/human_umap_all_split.pdf",marrangeGrob(list(g3,g4,g6,g7),nrow = 1, ncol=1, top=NULL), height=3,width=9)
+```
+
+
+### NEURON data labeled with ROI, Donor, Cluster
+```{r}
+colnames(umap_neuron) = c("Lim1","Lim2")
+
+g1 <- plot_RD_meta(umap_neuron, factor(allcl[row.names(umap_neuron),] %>% pull(cluster_label),levels=names(clcol)), meta.col=clcol,alpha=0.5, cex=1.5)
+g1 <- g1+	ggtitle("cluster") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+g2= plot_RD_meta(umap_neuron, factor(allcl[row.names(umap_neuron),] %>% pull(donor),levels=names(donorcol)), meta.col=donorcol,alpha=0.5, cex=2)
+g2 = g2 + ggtitle("donor") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+g3 <- g2 + facet_wrap(~meta)
+
+g2[["data"]]$roi <- allcl$roi[allcl$sample_name %in% rownames(umap_neuron) ]
+g4 <- g2 + facet_wrap(~roi)
+
+
+g5 <- plot_RD_meta(umap_neuron, factor(allcl[row.names(umap_neuron),] %>% pull(roi),levels=names(rcol)), meta.col=rcol,alpha=0.5, cex=1.5)
+g5 <- g5 + ggtitle("roi") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+g6 <- g5 + facet_wrap(~meta)
+
+g5[["data"]]$donor <- allcl$donor[allcl$sample_name %in% rownames(umap_neuron) ]
+g7 <- g5 + facet_wrap(~donor)
+
+
+g1
+g2
+g3
+g4
+g5
+g6
+g7
+
+```
+
+```{r, eval=FALSE}
+ggsave(file="../analysis_output/human_umap_neuron.pdf",marrangeGrob(list(g1,g2,g5),nrow = 1, ncol=1, top=NULL), height=4,width=4)
+
+ggsave(file="../analysis_output/human_umap_neuron_split.pdf",marrangeGrob(list(g3,g4,g6,g7),nrow = 1, ncol=1, top=NULL), height=3,width=9)
+```
+
+
+### MP data labeled with ROI, Donor, Cluster
+```{r}
+colnames(umap_mp) = c("Lim1","Lim2")
+
+g1 <- plot_RD_meta(umap_mp, factor(allcl[row.names(umap_mp),] %>% pull(cluster_label),levels=names(clcol)), meta.col=clcol,alpha=0.5, cex=1.5)
+g1 <- g1+	ggtitle("cluster") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+g2= plot_RD_meta(umap_mp, factor(allcl[row.names(umap_mp),] %>% pull(donor),levels=names(donorcol)), meta.col=donorcol,alpha=0.5, cex=2)
+g2 = g2 + ggtitle("donor") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+g3 <- g2 + facet_wrap(~meta)
+
+g2[["data"]]$roi <- allcl$roi[allcl$sample_name %in% rownames(umap_mp) ]
+g4 <- g2 + facet_wrap(~roi)
+
+
+g5 <- plot_RD_meta(umap_mp, factor(allcl[row.names(umap_mp),] %>% pull(roi),levels=names(rcol)), meta.col=rcol,alpha=0.5, cex=1.5)
+g5 <- g5 + ggtitle("roi") +
+		theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+ 		theme_void() + 
+ 		theme(legend.position="none") 
+
+g6 <- g5 + facet_wrap(~meta)
+
+g5[["data"]]$donor <- allcl$donor[allcl$sample_name %in% rownames(umap_mp) ]
+g7 <- g5 + facet_wrap(~donor)
+
+
+g1
+g2
+g3
+g4
+g5
+g6
+g7
+```
+
+```{r, eval=FALSE}
+ggsave(file="../analysis_output/human_umap_mp.pdf",marrangeGrob(list(g1,g2,g5),nrow = 1, ncol=1, top=NULL), height=4,width=4)
+
+ggsave(file="../analysis_output/human_umap_mp_split.pdf",marrangeGrob(list(g3,g4,g6,g7),nrow = 1, ncol=1, top=NULL), height=3,width=9)
+```
+
+### MP cluster 1d UMAP plots
+```{r}
+temp=plot_objects[["mp"]]
+temp=RunUMAP(temp,reduction="pca",dims=1:15, n.components=1)
+umap_mp1 <- temp@reductions$umap@cell.embeddings
+
+# plot 1d umap as grouped scatter plot per donor colored by dissection
+umap_mp1 <- tibble::rownames_to_column(as.data.frame(umap_mp1), var="sample_name")
+umap_mp1 <- left_join(umap_mp1, allcl)
+umap_mp1$roi <- as.factor(umap_mp1$roi)
+
+g1 <- ggplot(umap_mp1) +
+    geom_density(aes(x = UMAP_1, fill = roi, color=roi), alpha=0.15) +
+    scale_fill_manual(values=as.vector(rcol[levels(umap_mp1$roi)])) + scale_color_manual(values=as.vector(rcol[levels(umap_mp1$roi)]))+
+    ggthemes::theme_few() + 
+   	theme(legend.position="none") +
+   	theme(axis.text.y=element_text())
+
+g2 <- g1+    facet_grid(donor ~.)
+
+g3 <- ggplot(umap_mp1, aes(y=roi, x=UMAP_1)) + 
+  	geom_point(aes(color = roi), shape=124, size=8) +
+  	scale_color_manual(values=as.vector(rcol[levels(umap_mp1$roi)]))+
+  	ggthemes::theme_few() + 
+   	theme(legend.position="none") +
+   	theme(axis.text.y=element_text())
+
+g4 <- g3+ facet_grid(donor ~.)
+
+g5 <- ggplot(umap_mp1, aes(y=roi, x=UMAP_1)) + 
+	  geom_jitter(aes(color = roi),
+     				stat = "identity", 
+     				position = position_jitter(0.2)) +
+ 	  scale_color_manual(values=as.vector(rcol[levels(umap_mp1$roi)]))+
+    ggthemes::theme_few() + 
+   	theme(legend.position="none") +
+   	theme(axis.text.y=element_text())
+   	
+g6 <- g5 +    facet_grid(donor ~.)
+
+g1
+g2
+g3
+g4
+g5
+g6
+
+
+```
+```{r}
+ggsave(file="../analysis_output/human_umap_mp_1d.pdf",marrangeGrob(list(g1,g2,g3,g4,g5,g6),nrow = 1, ncol=1, top=NULL), height=3,width=5)
+```
+
+# Barplot showing dissection ROI distribution among clusters
+```{r barplot}
+
+allcl$cluster_label <- factor(allcl$cluster_label, levels=c("GABA1","GABA2", "GABA3","K1","K2","MP","Micro","Astro","Oligo","OPC"))
+allcl$roi <- as.factor(allcl$roi)
+
+propvals <- allcl %>% 
+          group_by(cluster_label, roi) %>% 
+          summarise(n = n()) %>%
+          mutate(freq = n / sum(n))
+
+p1 <- ggplot(propvals, aes(fill=roi, y=n, x=cluster_label)) + 
+    geom_bar(position="fill", stat="identity") +
+    #scale_fill_manual(values=rcol)
+    scale_fill_manual(values=as.vector(rcol[levels(allcl$roi)])) +
+    ylab("Fraction of nuclei") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+    theme(axis.title.x = element_blank())
+
+
+
+allcl$roi_ap <- as.factor(allcl$roi_ap)
+
+  
+propvals <- allcl %>% 
+          group_by(cluster_label, roi_ap) %>% 
+          summarise(n = n()) %>%
+          mutate(freq = n / sum(n))
+
+p2 <- ggplot(propvals, aes(fill=roi_ap, y=n, x=cluster_label)) + 
+    geom_bar(position="fill", stat="identity") +
+    #scale_fill_manual(values=rcol)
+    scale_fill_manual(values=as.vector(roi_apcol[levels(allcl$roi_ap)])) +
+    ylab("Fraction of nuclei") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+    theme(axis.title.x = element_blank())
+
+
+
+p1
+p2
+
+allcl.sub <- allcl[allcl$cluster_label == "MP",]
+
+propvals <- allcl.sub %>% 
+          group_by(donor, roi_ap) %>% 
+          summarise(n = n()) %>%
+          mutate(freq = n / sum(n))
+
+p3 <- ggplot(propvals, aes(fill=roi_ap, y=n, x=donor)) + 
+    geom_bar(position="fill", stat="identity") +
+    #scale_fill_manual(values=rcol)
+    scale_fill_manual(values=as.vector(roi_apcol[levels(allcl$roi_ap)])) +
+    ylab("Fraction of nuclei") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+    theme(axis.title.x = element_blank()) +
+    ggtitle("Cluster MP")
+
+p3
+
+p4 <- ggplot(propvals, aes(fill=roi_ap, y=n, x=donor)) + 
+    geom_bar(position="stack", stat="identity") +
+    #scale_fill_manual(values=rcol)
+    scale_fill_manual(values=as.vector(roi_apcol[levels(allcl$roi_ap)])) +
+    ylab("Fraction of nuclei") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+    theme(axis.title.x = element_blank()) +
+    ggtitle("Cluster MP")
+
+p4
+
+
+#ggsave(file="../analysis_output/human_roi_barplot.pdf", marrangeGrob(list(p1,p2,p3,p4),nrow = 1, ncol=1, top=NULL), height = 3, width = 4, useDingbats=FALSE)
+```
+
+
+####de genes heatmap MP###
+```{r}
+  
+
+require(feather)
+require(dplyr)
+require(WGCNA)
+require(gplots)
+require(edgeR)
+
+m.mp <- plot_objects[["mp"]]
+Idents(m.mp) <- "cluster_label"
+meta <- m.mp@meta.data
+
+mdat <- as.matrix(m.mp@assays[["RNA"]]@counts)
+class1=meta$sample_name[meta$roi == "PC"]
+class2=meta$sample_name[meta$roi == "MC"]
+
+sel.cells <- append(class1,class2)
+mdat <- mdat[,sel.cells]
+
+classvals=as.factor(rep(c(1,2),times=c(length(class1),length(class2))))
+startmat=cpm(mdat)
+
+e_design=model.matrix(~classvals)
+y2 = DGEList(counts=mdat)
+y2 = estimateDisp(y2, e_design)
+fit = glmQLFit(y2, e_design)
+qlf.2vs1 <- glmQLFTest(fit, coef=2)
+outval2=topTags(qlf.2vs1,n=nrow(startmat),p.value=1)
+outval2$table=outval2$table[intersect(rownames(outval2$table),rownames(startmat)),]
+mean1=apply(startmat[rownames(outval2$table),classvals==1],1,mean)
+mean2=apply(startmat[rownames(outval2$table),classvals==2],1,mean)
+frac1=rowSums(startmat[rownames(outval2$table),classvals==1]>0)/length(class1)
+frac2=rowSums(startmat[rownames(outval2$table),classvals==2]>0)/length(class2)
+outmat=cbind(outval2$table,mean1,mean2,frac1,frac2)
+
+suboutmat=outmat[outmat$FDR<0.001 & apply(outmat[,c("frac1","frac2")],1,max)>0.25,]
+suboutmat=suboutmat[-grep("Gm|LOC",rownames(suboutmat)),]
+
+keepgen1=rownames(suboutmat)[order(-suboutmat$logFC)[1:16]]
+keepgen2=rownames(suboutmat)[order(suboutmat$logFC)[1:16]]
+
+keepgen=c()
+
+keepgen<-c(keepgen1,keepgen2, "Pvalb", "Calb1", "Necab1","Foxp2")
+
+submat <- outmat[keepgen,]
+submat <- submat[order(-submat$logFC),]
+
+keepgen1=rownames(submat)[order(-submat$logFC)[1:18]]
+keepgen2=rownames(submat)[order(submat$logFC)[1:18]]
+
+plotmat=startmat[c(keepgen1,keepgen2),]
+colvec=rep(c("#580077","#B000CC"),times=c(length(class1),length(class2)))
+breakvals=seq(from=-2,to=2,length.out=201)
+colnames(plotmat)=rep("",ncol(plotmat))
+
+pdf("../analysis_output/mouse_core_shell_de_genes.pdf",useDingbats=F, height=7, width=11)
+heatmap.2(log10(plotmat+1),breaks=breakvals,col=bluered(200),scale="row",trace='none',Rowv=F,Colv=F,ColSideColors=colvec)
+dev.off()
+```
