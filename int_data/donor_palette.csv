@@ -1,0 +1,11 @@
+roi,donor ,donor_color,species,dissection_roi,donor_roi_color,donor_roi,donor_alias
+Macaque LGN Parvocellular,Q18.27.001,#173F5F,Macaque,PC,#FD9A24,Q18.27.001_PC,
+Macaque LGN Magnocellular,Q18.27.001,#173F5F,Macaque,MC,#6DAAF2,Q18.27.001_MC,
+Macaque LGN Magnocellular,Q17.27.002,#3CAEA3,Macaque,MC,#174596,Q17.27.002_MC,
+Macaque LGN Parvocellular,Q17.27.002,#3CAEA3,Macaque,PC,#FF5800,Q17.27.002_PC,
+Macaque LGN Magnocellular,Q18.27.003,#F6D55C,Macaque,MC,#b6d4f8,Q18.27.003_MC,
+Macaque LGN Parvocellular,Q18.27.003,#F6D55C,Macaque,PC,#FCCF3E,Q18.27.003_PC,
+Macaque Pulvinar - Inferior,Q18.27.003,#F6D55C,Macaque,Pulv,#BEBEBE,Q18.27.003_Pulv,
+,H200.1023,#2b2b2b,Human,,#2b2b2b,,Donor 1
+,H200.1025,#7f7f7f,Human,,#7f7f7f,,Donor 2
+,H200.1030,#c5c5c5,Human,,#c5c5c5,,Donor 3

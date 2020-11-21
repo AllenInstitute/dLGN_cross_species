@@ -1,0 +1,37 @@
+cluster_id,cluster_label,cluster_color,class_label,class_color,class_id,species_label,species_color,species_id,org_cl.lab
+1,Chrna1,#bf3078,GABA,#f02864,1,Mouse,#FF73D0,3,Chrna1
+2,Chrna2,#f283b5,GABA,#f02864,1,Mouse,#FF73D0,3,Chrna2
+3,Chrna3,#f4dceb,GABA,#f02864,1,Mouse,#FF73D0,3,Chrna3
+4,GABA1,#990400,GABA,#f02864,1,Mouse,#FF73D0,3,GABA1
+5,GABA2,#CC0600,GABA,#f02864,1,Mouse,#FF73D0,3,GABA2
+6,GABA3,#FF0000,GABA,#f02864,1,Mouse,#FF73D0,3,GABA3
+7,GABA4,#FF524C,GABA,#f02864,1,Mouse,#FF73D0,3,GABA4
+8,GABA5,#FF837F,GABA,#f02864,1,Mouse,#FF73D0,3,GABA5
+9,GABA6,#FFCDCC,GABA,#f02864,1,Mouse,#FF73D0,3,GABA6
+10,LGd,#007B9D,Glut,#00ADEE,2,Mouse,#FF73D0,3,LGd
+11,LGv,#99E9F1,Glut,#00ADEE,2,Mouse,#FF73D0,3,LGv
+12,LP,#33D4E3,Glut,#00ADEE,2,Mouse,#FF73D0,3,LP
+13,Oligo1,#436057,Non-Neuronal,#53776C,3,Mouse,#FF73D0,3,Oligo1
+14,Oligo2,#689081,Non-Neuronal,#53776C,3,Mouse,#FF73D0,3,Oligo2
+15,Oligo3,#8fb1a6,Non-Neuronal,#53776C,3,Mouse,#FF73D0,3,Oligo3
+16,Low Quality,#414042,Low Quality,#000000,0,Mouse,#FF73D0,3,Low Quality
+1,GABA1,#f45193,GABA,#f02864,1,Human,#000000,2,GABA2
+2,GABA2,#821d55,GABA,#f02864,1,Human,#000000,2,GABA1
+3,GABA3,#f7aad8,GABA,#f02864,1,Human,#000000,2,GABA3
+4,K1,#428418,Glut,#00ADEE,2,Human,#000000,2,K1
+5,K2,#7bb758,Glut,#00ADEE,2,Human,#000000,2,K2
+6,MP,#2196F3,Glut,#00ADEE,2,Human,#000000,2,MP
+7,Micro,#6E7C6F,Non-Neuronal,#53776C,3,Human,#000000,2,Micro
+8,Astro,#5A503F,Non-Neuronal,#53776C,3,Human,#000000,2,Astro
+9,Oligo,#577D70,Non-Neuronal,#53776C,3,Human,#000000,2,Oligo
+10,OPC,#3F574E,Non-Neuronal,#53776C,3,Human,#000000,2,OPC
+1,GABA1,#7f3762,GABA,#f02864,1,Macaque,#939598,1,GABA3
+2,GABA2,#DD6091,GABA,#f02864,1,Macaque,#939598,1,GABA2
+3,GABA3,#FF88AD,GABA,#f02864,1,Macaque,#939598,1,GABA1
+4,GABA4,#FAB9D3,GABA,#f02864,1,Macaque,#939598,1,GABA4
+5,M,#90caf9,Glut,#00ADEE,2,Macaque,#939598,1,M
+6,P,#0d47a1,Glut,#00ADEE,2,Macaque,#939598,1,P
+7,K1,#1e633b,Glut,#00ADEE,2,Macaque,#939598,1,K1
+8,K2,#2c9157,Glut,#00ADEE,2,Macaque,#939598,1,K2
+9,Pulv,#b0bec5,Glut,#00ADEE,2,Macaque,#939598,1,Pulv
+10,Low Quality,#444444,Low Quality,#000000,0,Macaque,#939598,1,Low Quality
